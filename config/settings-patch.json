@@ -1,9 +1,0 @@
-{
-  "_comment": "Add this block to the SessionStart array in your ~/.claude/settings.json",
-  "hooks": [
-    {
-      "type": "command",
-      "command": "bash /home/YOUR_USERNAME/.claude/bin/factory-init.sh"
-    }
-  ]
-}

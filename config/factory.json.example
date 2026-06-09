@@ -1,8 +1,0 @@
-{
-  "name": "your-project-name",
-  "repos": {
-    "backend": "./backend",
-    "frontend": "./frontend"
-  },
-  "features": {}
-}

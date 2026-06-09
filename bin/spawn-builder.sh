@@ -106,6 +106,7 @@ EOF
 
 # Create tmux session
 tmux new-session -d -s "$ISSUE" -c "$WORKTREE_PATH" \
+  -e "PATH=$PROJECT_ROOT/bin:$PATH" \
   -e "KANBAN_PROJECT_ROOT=$PROJECT_ROOT" \
   -e "FEATURE_NAME=$ISSUE" \
   -e "FEATURE_PORT=$PORT"

@@ -8,7 +8,16 @@ if [ ! -f "$PROJECT_ROOT/factory.json" ]; then
   exit 0
 fi
 
-export PATH="$HOME/.claude/bin:$PATH"
+export PATH="$PROJECT_ROOT/bin:$PATH"
+
+# Add bin/ to ~/.bashrc so builders launched in new shells also find the scripts
+if ! grep -qF "$PROJECT_ROOT/bin" "$HOME/.bashrc" 2>/dev/null; then
+  echo "export PATH=\"$PROJECT_ROOT/bin:\$PATH\" # claude-factory" >> "$HOME/.bashrc"
+fi
+
+# Copy kanban skill so builders can invoke Skill({skill:"kanban"})
+mkdir -p "$HOME/.claude/skills/kanban"
+cp "$PROJECT_ROOT/skills/kanban/SKILL.md" "$HOME/.claude/skills/kanban/SKILL.md" 2>/dev/null || true
 
 # Write coordinator sentinel (tmux session name or fallback)
 SESSION=$(tmux display-message -p '#S' 2>/dev/null || echo "main")
@@ -67,7 +76,7 @@ install_hook() {
   fi
   local hook="$abs_repo/.git/hooks/post-merge"
   if [ -d "$abs_repo/.git" ]; then
-    cp "$HOME/.claude/bin/post-merge-hook.sh" "$hook"
+    cp "$PROJECT_ROOT/bin/post-merge-hook.sh" "$hook"
     chmod +x "$hook"
     echo "  post-merge hook installed: $abs_repo"
   fi
