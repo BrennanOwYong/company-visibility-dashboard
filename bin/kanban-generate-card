@@ -1,0 +1,139 @@
+#!/bin/bash
+# kanban-generate-card <issue>
+# kanban-generate-card --group <issue1> <issue2> ...
+# Reads kanban issue MD files and writes a user-test card referencing the parent feature.
+set -e
+
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+KANBAN_DIR="$PROJECT_ROOT/kanban"
+CARD_DIR="$KANBAN_DIR/user-test-cards"
+mkdir -p "$CARD_DIR"
+
+GROUP_MODE=false
+if [ "$1" = "--group" ]; then
+  GROUP_MODE=true
+  shift
+fi
+
+ISSUES=("$@")
+
+if $GROUP_MODE; then
+  GROUP_NAME=$(IFS='+'; echo "${ISSUES[*]}")
+  CARD_FILE="$CARD_DIR/${GROUP_NAME}-group-card.md"
+
+  # Collect parent features (deduplicated)
+  FEATURES_LIST=""
+  for ISSUE in "${ISSUES[@]}"; do
+    KANBAN_FILE="$KANBAN_DIR/$ISSUE.md"
+    [ -f "$KANBAN_FILE" ] || continue
+    FEAT=$(grep "^feature:" "$KANBAN_FILE" | awk '{print $2}')
+    [ -n "$FEAT" ] && FEATURES_LIST="$FEATURES_LIST $FEAT"
+  done
+  FEATURES_DEDUPED=$(echo "$FEATURES_LIST" | tr ' ' '\n' | sort -u | tr '\n' ' ' | xargs)
+
+  {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "USER TEST — INTEGRATED FLOW"
+    echo "Features: $FEATURES_DEDUPED"
+    echo "Issues  : ${ISSUES[*]}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "These issues were built in parallel against spec contracts."
+    echo "Test them as a connected flow."
+    echo ""
+
+    SETUP_CMDS=""
+    ALL_TESTS=""
+
+    for ISSUE in "${ISSUES[@]}"; do
+      KANBAN_FILE="$KANBAN_DIR/$ISSUE.md"
+      [ -f "$KANBAN_FILE" ] || continue
+
+      PORT=$(grep "^port:" "$KANBAN_FILE" | awk '{print $2}')
+      WORKTREE=$(grep "^worktree:" "$KANBAN_FILE" | awk '{print $2}')
+      TEST_CMD=$(grep "^test_command:" "$KANBAN_FILE" | sed 's/^test_command:[[:space:]]*//')
+      WHAT_BUILT=$(awk '/^## What was built/{found=1; next} /^## /{found=0} found{print}' "$KANBAN_FILE")
+      TESTS=$(grep "^- \[x\]" "$KANBAN_FILE" 2>/dev/null || true)
+
+      echo "── $ISSUE ──"
+      echo "$WHAT_BUILT"
+      echo ""
+
+      if [ -n "$TEST_CMD" ]; then
+        SETUP_CMDS="${SETUP_CMDS}  $TEST_CMD\n"
+      else
+        SETUP_CMDS="${SETUP_CMDS}  cd $WORKTREE && npm run dev   # $ISSUE on port $PORT\n"
+      fi
+      ALL_TESTS="${ALL_TESTS}${TESTS}\n"
+    done
+
+    echo "SETUP"
+    printf "$SETUP_CMDS"
+    echo ""
+    echo "ALREADY VERIFIED BY BUILDER (skip these)"
+    printf "$ALL_TESTS" | grep -v '^$' || echo "  (none recorded)"
+    echo ""
+    echo "WHAT YOU ARE JUDGING"
+    echo "  [ ] Does the end-to-end flow complete without friction?"
+    echo "  [ ] Does each step make sense to a first-time user?"
+    echo "  [ ] Does it feel fast or sluggish at any point?"
+    echo "  [ ] Is any part surprising or confusing?"
+    echo "  [ ] Would you redo or skip any step?"
+    echo ""
+    echo "Reply: \"good\" or \"needs work: [issue] — [what specifically]\""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  } > "$CARD_FILE"
+
+  echo "Group card written: $CARD_FILE"
+
+else
+  ISSUE="${ISSUES[0]}"
+  KANBAN_FILE="$KANBAN_DIR/$ISSUE.md"
+  CARD_FILE="$CARD_DIR/$ISSUE-card.md"
+
+  PORT=$(grep "^port:" "$KANBAN_FILE" | awk '{print $2}')
+  WORKTREE=$(grep "^worktree:" "$KANBAN_FILE" | awk '{print $2}')
+  FEATURE=$(grep "^feature:" "$KANBAN_FILE" | awk '{print $2}')
+  TEST_CMD=$(grep "^test_command:" "$KANBAN_FILE" | sed 's/^test_command:[[:space:]]*//')
+  WHAT_BUILT=$(awk '/^## What was built/{found=1; next} /^## /{found=0} found{print}' "$KANBAN_FILE")
+  HOW_WORKS=$(awk '/^## How it works/{found=1; next} /^## /{found=0} found{print}' "$KANBAN_FILE")
+  TESTS=$(grep "^- \[x\]" "$KANBAN_FILE" 2>/dev/null || echo "  (none recorded)")
+
+  # Resolve test launch instruction
+  if [ -n "$TEST_CMD" ]; then
+    LAUNCH="$TEST_CMD"
+  else
+    LAUNCH="cd $WORKTREE && npm run dev   # port $PORT → http://localhost:$PORT"
+  fi
+
+  cat > "$CARD_FILE" << EOF
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+USER TEST — $FEATURE
+Issue: $ISSUE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WHAT WAS BUILT
+$WHAT_BUILT
+
+HOW IT WORKS
+$HOW_WORKS
+
+SETUP
+  $LAUNCH
+
+ALREADY VERIFIED BY BUILDER (skip these)
+$TESTS
+
+WHAT YOU ARE JUDGING
+  [ ] Does this feature do what you asked for?
+  [ ] Does the flow feel intuitive?
+  [ ] Does it feel fast or sluggish?
+  [ ] Is anything surprising or confusing?
+  [ ] Would a first-time user understand what to do?
+
+Reply: "good" or "needs work: [what specifically]"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EOF
+
+  echo "Card written: $CARD_FILE"
+fi

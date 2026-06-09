@@ -1,0 +1,49 @@
+#!/bin/bash
+# kanban-update <issue> <status> [notes]
+# Any status string is valid. Structured values used by kanban-eval:
+#   IN_PROGRESS  — actively building
+#   NEEDS_ACTION — blocked on human/external action (state exactly what + who)
+#   BLOCKED_ON   — waiting on another issue's output (state issue id + what you need)
+#   BUILT        — builder done, tests pass, ready for user testing (triggers test card)
+#   COMPLETE     — coordinator closes after user approval (use kanban-done instead)
+set -e
+
+ISSUE="$1"
+STATUS="$2"
+NOTES="${3:-}"
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+KANBAN_FILE="$PROJECT_ROOT/kanban/$ISSUE.md"
+TELEMETRY_FILE="$PROJECT_ROOT/kanban/telemetry.jsonl"
+
+if [ -z "$ISSUE" ] || [ -z "$STATUS" ]; then
+  echo "Usage: kanban-update <issue> <status> [notes]"
+  exit 1
+fi
+
+if [ ! -f "$KANBAN_FILE" ]; then
+  echo "No kanban entry: $KANBAN_FILE"
+  exit 1
+fi
+
+PREV_STATUS=$(grep "^status:" "$KANBAN_FILE" | awk '{print $2}')
+
+sed -i "s/^status: .*/status: $STATUS/" "$KANBAN_FILE"
+
+printf '\n### %s — %s\n%s\n' "$(date '+%Y-%m-%d %H:%M')" "$STATUS" "${NOTES:-no notes}" >> "$KANBAN_FILE"
+
+TS=$(date +%s%3N 2>/dev/null || python3 -c "import time; print(int(time.time()*1000))" 2>/dev/null || echo "0")
+printf '{"ts":%s,"issue":"%s","from":"%s","to":"%s","notes":%s}\n' \
+  "$TS" "$ISSUE" "${PREV_STATUS:-NONE}" "$STATUS" \
+  "$(printf '%s' "${NOTES:-}" | python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" 2>/dev/null || echo '"'"$NOTES"'"')" \
+  >> "$TELEMETRY_FILE"
+
+echo "[$ISSUE] $STATUS${NOTES:+ — $NOTES}"
+
+# BUILT triggers test card generation and coordinator ping
+if [ "$STATUS" = "BUILT" ]; then
+  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" kanban-generate-card "$ISSUE"
+  COORDINATOR=$(cat ~/.claude/.coordinator 2>/dev/null)
+  CARD="$PROJECT_ROOT/kanban/user-test-cards/$ISSUE-card.md"
+  [ -n "$COORDINATOR" ] && tmux send-keys -t "$COORDINATOR" \
+    "[$ISSUE] BUILT — user test card ready for review: $CARD" Enter
+fi

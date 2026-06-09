@@ -1,0 +1,25 @@
+#!/bin/bash
+# kanban-resolved <feature> [notes]
+# Coordinator calls this after unblocking a builder.
+# Logs resolution event to kanban/coordinator-log.jsonl and pings the builder.
+set -e
+
+FEATURE="$1"
+NOTES="${2:-unblocked}"
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+COORD_LOG="$PROJECT_ROOT/kanban/coordinator-log.jsonl"
+
+TS=$(date +%s%3N 2>/dev/null || python3 -c "import time; print(int(time.time()*1000))" 2>/dev/null || echo "0")
+
+printf '{"ts":%s,"event":"resolved","feature":"%s","notes":%s}\n' \
+  "$TS" "$FEATURE" \
+  "$(printf '%s' "$NOTES" | python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" 2>/dev/null || echo '"'"$NOTES"'"')" \
+  >> "$COORD_LOG"
+
+# Ping builder session if it exists
+if tmux has-session -t "$FEATURE" 2>/dev/null; then
+  tmux send-keys -t "$FEATURE" "Coordinator unblocked you: $NOTES — continue building." Enter
+  echo "[$FEATURE] unblocked and pinged"
+else
+  echo "[$FEATURE] resolution logged (no active tmux session found)"
+fi
