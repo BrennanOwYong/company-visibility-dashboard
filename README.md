@@ -1,22 +1,10 @@
 # software_factory_cc
 
-A coordination harness for Claude Code that runs a main coordinator session managing parallel builder agents in isolated git worktrees. Builders report progress via a file-based kanban board. A kanban UI server visualises ticket state and lets you launch test environments from the browser.
+This is your project-specific Claude Code config. Clone it, drop it into your project folder, and run the installer. It turns Claude Code into a coordinator that plans work, spawns parallel builder agents, and tracks everything through a file-based kanban board.
 
-## What this is
+## How to use this
 
-The coordinator (Claude Opus) plans work, decomposes features into issue tickets, writes handoff specs, and spawns builder agents (Claude Sonnet) in tmux sessions. Each builder works in its own git worktree and reports status via the kanban scripts. Git post-merge hooks ping the coordinator when a build completes. The coordinator reviews the test card and calls kanban-done to close the ticket.
-
-## Prerequisites
-
-- **tmux** — required for builder session management
-  - Ubuntu/Debian: `sudo apt install tmux`
-  - macOS: `brew install tmux`
-  - Verify: `tmux -V`
-- **Node.js 18+** — required for kanban-ui and telemetry scripts
-- **Claude Code CLI** — installed and authenticated
-- **WSL2 or Linux** — Windows native not supported
-
-## Install
+Clone this repo into your project directory (or anywhere on the machine — it installs into `~/.claude`):
 
 ```bash
 git clone https://github.com/BrennanOwYong/software_factory_cc.git
@@ -24,20 +12,49 @@ cd software_factory_cc
 bash install.sh
 ```
 
-Then follow the 5 manual steps printed by the installer:
+Then follow the 5 manual steps the installer prints. After that, open Claude Code in any project folder that has a `factory.json` file and the factory activates automatically.
+
+## What it does
+
+The coordinator session (Claude Opus) asks you what you want to build, walks through the feature list with you, writes a spec, decomposes it into issue tickets, and spawns builder agents (Claude Sonnet) as parallel tmux sessions. Each builder works in its own git worktree. When a builder finishes, it pings the coordinator with a test card. You review it, give feedback, and the coordinator closes the ticket.
+
+## Prerequisites
+
+- **tmux** — manages builder sessions
+  - Ubuntu/Debian: `sudo apt install tmux`
+  - macOS: `brew install tmux`
+  - Verify: `tmux -V`
+- **Node.js 18+** — runs the kanban UI
+- **Claude Code CLI** — installed and authenticated
+- **WSL2 or Linux** — Windows native not supported
+
+## Install
+
+```bash
+bash install.sh
+```
+
+Manual steps after install:
 1. Add `factory-init.sh` as a `SessionStart` hook in `~/.claude/settings.json` (see `config/settings-patch.json`)
 2. Append `config/CLAUDE-global-additions.md` to `~/.claude/CLAUDE.md`
 3. Append `config/CLAUDE-project-additions.md` to your project's `CLAUDE.md`
 4. Create `factory.json` in your project root (see `config/factory.json.example`)
 5. Run `source ~/.bashrc`
 
-## Usage
+## Starting a project
 
-1. Create `factory.json` in your project root (marks it as a factory project).
-2. Open Claude Code in that directory — the coordinator session activates automatically.
-3. Tell the coordinator what features you want. It will ask clarifying questions, build the spec, and spawn builders.
-4. Builders run in parallel tmux sessions. Watch progress with `kanban-check`.
-5. When a builder finishes, the coordinator pings you with a test card. Run the kanban UI to review it.
+1. Put `factory.json` in your project root — this marks it as a factory project.
+2. Open Claude Code in that directory — the coordinator activates automatically.
+3. Tell it what you want to build. It will ask about features and user flows before writing any code.
+4. Builders run in parallel. Watch progress with `kanban-check` or open the kanban UI.
+
+## Kanban UI
+
+Reads `kanban/*.md` in the project root and serves a board at `http://localhost:2999`. Shows tickets by status, which feature each ticket belongs to, the test card for BUILT tickets, and a Launch Test button that fires the builder's `test_command`.
+
+```bash
+KANBAN_PROJECT_ROOT=/path/to/your/project node kanban-ui/server.js
+```
 
 ## Kanban UI
 

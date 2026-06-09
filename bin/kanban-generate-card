@@ -73,14 +73,15 @@ if $GROUP_MODE; then
     echo "ALREADY VERIFIED BY BUILDER (skip these)"
     printf "$ALL_TESTS" | grep -v '^$' || echo "  (none recorded)"
     echo ""
-    echo "WHAT YOU ARE JUDGING"
-    echo "  [ ] Does the end-to-end flow complete without friction?"
-    echo "  [ ] Does each step make sense to a first-time user?"
-    echo "  [ ] Does it feel fast or sluggish at any point?"
-    echo "  [ ] Is any part surprising or confusing?"
-    echo "  [ ] Would you redo or skip any step?"
+    echo "YOUR CALL"
+    echo "These issues were built in parallel against a shared spec. Walk through the connected flow as a real user would — then tell me what you think."
     echo ""
-    echo "Reply: \"good\" or \"needs work: [issue] — [what specifically]\""
+    echo "  • Does the end-to-end flow feel like what you originally described?"
+    echo "  • Where does it slow you down, confuse you, or make you second-guess?"
+    echo "  • Does handing off between the parts feel seamless or bumpy?"
+    echo "  • What would you change before shipping this?"
+    echo ""
+    echo "Reply: \"good\" or describe specifically what needs to change and in which part."
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   } > "$CARD_FILE"
 
@@ -124,14 +125,15 @@ SETUP
 ALREADY VERIFIED BY BUILDER (skip these)
 $TESTS
 
-WHAT YOU ARE JUDGING
-  [ ] Does this feature do what you asked for?
-  [ ] Does the flow feel intuitive?
-  [ ] Does it feel fast or sluggish?
-  [ ] Is anything surprising or confusing?
-  [ ] Would a first-time user understand what to do?
+YOUR CALL
+Think back to what you asked for. Walk through this as a real user would — then tell me what you think.
 
-Reply: "good" or "needs work: [what specifically]"
+  • Does this deliver what you had in mind? What's missing or different?
+  • How does the flow feel? Where does it slow you down or make you hesitate?
+  • First impression — what stands out, good or bad?
+  • Would someone who has never seen this know what to do?
+
+Reply: "good" or describe specifically what needs to change.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 EOF
 
