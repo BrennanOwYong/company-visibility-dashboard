@@ -111,24 +111,40 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function renderDeps(raw) {
+function renderDeps(raw, allTickets) {
   if (!raw || raw === '[]' || raw === '') return '';
-  // Parse "[auth-system, analytics-dashboard]" or "auth-system,analytics-dashboard"
   const cleaned = raw.replace(/[\[\]]/g, '').trim();
   if (!cleaned) return '';
   const deps = cleaned.split(',').map(d => d.trim()).filter(Boolean);
-  const badges = deps.map(d =>
-    `<a class="dep-badge" href="/prd" title="View PRD / feature checklist">${esc(d)}</a>`
-  ).join('');
+  // Resolve dep issue → feature so we can deep-link into PRD
+  const badges = deps.map(d => {
+    const depTicket = allTickets && allTickets.find(t => t.issue === d);
+    const anchor = depTicket && depTicket.feature ? `#${depTicket.feature}` : '';
+    return `<a class="dep-badge" href="/prd${anchor}" title="View in PRD">${esc(d)}</a>`;
+  }).join('');
   return `<div class="deps">depends on ${badges}</div>`;
 }
 
-function renderTestCardBlock(card, test_command) {
-  if (!card) {
-    if (!test_command) return '';
-    return `<div class="test-card">
-      <button class="launch-btn" onclick="launch(this,${JSON.stringify(test_command)})">▶ Launch Test</button>
+function renderTestCardBlock(card, test_command, feature, issue) {
+  const featureLink = feature
+    ? `<a class="tc-feature-link" href="/prd#${esc(feature)}">${esc(feature)} ↗</a>` : '';
+
+  const feedbackForm = `
+    <div class="feedback-form" id="fb-${esc(issue)}" style="display:none">
+      <textarea class="fb-input" placeholder="What did you think? Does this deliver what you asked for? Where did it slow you down or feel off?" rows="3"></textarea>
+      <div class="fb-actions">
+        <button class="fb-submit" onclick="submitFeedback('${esc(issue)}')">Submit feedback</button>
+        <span class="fb-hint">Writes to the kanban file for the coordinator.</span>
+      </div>
+      <div class="fb-result" id="fb-result-${esc(issue)}"></div>
     </div>`;
+
+  if (!card) {
+    if (!test_command && !issue) return '';
+    const btn = test_command
+      ? `<button class="launch-btn" onclick="launchAndReveal(this,'${esc(issue)}',${JSON.stringify(test_command)})">▶ Test this feature</button>`
+      : `<button class="launch-btn launch-plain" onclick="revealFeedback('${esc(issue)}')">Give feedback</button>`;
+    return `<div class="test-card">${featureLink}<div class="tc-setup">${btn}</div>${feedbackForm}</div>`;
   }
 
   const verifiedHtml = card.verified.length
@@ -145,16 +161,21 @@ function renderTestCardBlock(card, test_command) {
        <div class="tc-prompt">↳ Would someone who's never seen this know what to do?</div>`;
 
   const launchBtn = test_command
-    ? `<button class="launch-btn" onclick="launch(this,${JSON.stringify(test_command)})">▶ Launch Test</button>` : '';
+    ? `<button class="launch-btn" onclick="launchAndReveal(this,'${esc(issue)}',${JSON.stringify(test_command)})">▶ Test this feature</button>`
+    : `<button class="launch-btn launch-plain" onclick="revealFeedback('${esc(issue)}')">Give feedback</button>`;
 
   return `<div class="test-card">
-    ${card.setup ? `<div class="tc-setup"><span class="tc-label">Setup</span><code>${esc(card.setup)}</code>${launchBtn}</div>` : launchBtn ? `<div class="tc-setup">${launchBtn}</div>` : ''}
+    ${featureLink}
+    ${card.setup
+      ? `<div class="tc-setup"><span class="tc-label">Setup</span><code>${esc(card.setup)}</code>${launchBtn}</div>`
+      : `<div class="tc-setup">${launchBtn}</div>`}
     ${verifiedHtml}
     <div class="tc-section tc-call">
       <div class="tc-call-header">Your call</div>
       <div class="tc-call-intro">Think back to what you asked for. Walk through this as a real user would — then tell me what you think.</div>
       ${promptsHtml}
     </div>
+    ${feedbackForm}
   </div>`;
 }
 
@@ -181,17 +202,18 @@ function renderPage(tickets) {
       const testsHtml = t.tests.length
         ? `<div class="tests"><span>Verified:</span><ul>${t.tests.map(tt =>
             `<li>${esc(tt.replace(/^- \[x\] /,''))}</li>`).join('')}</ul></div>` : '';
+      const featureHref = t.feature ? `/prd#${esc(t.feature)}` : '/prd';
 
-      return `<div class="ticket">
+      return `<div class="ticket" id="ticket-${esc(t.issue)}">
         <div class="ticket-header">
           <span class="issue">${esc(t.issue)}</span>
-          <span class="feature-badge">${esc(t.feature || '—')}</span>
+          <a class="feature-badge" href="${featureHref}" title="View feature in PRD">${esc(t.feature || '—')}</a>
           ${t.port ? `<span class="port-badge">:${esc(t.port)}</span>` : ''}
         </div>
         ${built}${testsHtml}
-        ${renderDeps(t.dependsOn)}
+        ${renderDeps(t.dependsOn, tickets)}
         ${last}
-        ${renderTestCardBlock(t.testCard, t.test_command)}
+        ${renderTestCardBlock(t.testCard, t.test_command, t.feature, t.issue)}
       </div>`;
     }).join('');
 
@@ -230,7 +252,8 @@ header h1{font-size:17px;font-weight:600;color:#f1f5f9}
 .ticket{background:#161b27;border:1px solid #1e2433;border-radius:7px;padding:13px;margin-bottom:9px}
 .ticket-header{display:flex;align-items:center;gap:7px;margin-bottom:7px;flex-wrap:wrap}
 .issue{font-size:13px;font-weight:600;color:#f1f5f9}
-.feature-badge{background:#1e293b;border:1px solid #2d3748;color:#7c9eb5;font-size:10px;padding:2px 7px;border-radius:3px}
+.feature-badge{background:#1e293b;border:1px solid #2d3748;color:#7c9eb5;font-size:10px;padding:2px 7px;border-radius:3px;text-decoration:none}
+.feature-badge:hover{background:#1e3a5f;border-color:#3d5a80;color:#93c5fd}
 .port-badge{background:#0d1117;border:1px solid #1e2433;color:#475569;font-size:10px;padding:2px 7px;border-radius:3px}
 .what-built{font-size:11px;color:#94a3b8;line-height:1.5;margin-bottom:7px}
 .tests{font-size:11px;color:#475569;margin-bottom:7px}
@@ -255,8 +278,20 @@ header h1{font-size:17px;font-weight:600;color:#f1f5f9}
 .launch-btn{background:#6d28d9;border:none;color:#e2e8f0;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:11px;font-family:inherit;font-weight:600;white-space:nowrap;flex-shrink:0}
 .launch-btn:hover{background:#7c3aed}
 .launch-btn:disabled{background:#2d3748;color:#475569;cursor:not-allowed}
-.launch-out{font-size:10px;background:#0d1117;border-radius:4px;padding:7px;white-space:pre-wrap;color:#10b981;border:1px solid #1e2433}
-.launch-err{color:#ef4444}
+.launch-plain{background:#1e293b;border:1px solid #2d3748}
+.launch-plain:hover{background:#273548}
+.tc-feature-link{font-size:10px;color:#7c9eb5;text-decoration:none;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.tc-feature-link:hover{color:#93c5fd}
+.feedback-form{flex-direction:column;gap:8px;background:#0a0f1a;border:1px solid #1e3050;border-radius:6px;padding:11px 13px;margin-top:2px}
+.fb-input{background:#161b27;border:1px solid #2d3748;color:#e2e8f0;border-radius:5px;padding:8px 10px;font-size:11px;font-family:inherit;resize:vertical;width:100%;line-height:1.5}
+.fb-input:focus{outline:none;border-color:#6d28d9}
+.fb-input::placeholder{color:#374151}
+.fb-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.fb-submit{background:#6d28d9;border:none;color:#e2e8f0;padding:5px 14px;border-radius:5px;cursor:pointer;font-size:11px;font-family:inherit;font-weight:600}
+.fb-submit:hover{background:#7c3aed}
+.fb-submit:disabled{background:#2d3748;color:#475569;cursor:not-allowed}
+.fb-hint{font-size:10px;color:#374151}
+.fb-result{font-size:11px;color:#10b981;margin-top:2px}
 .empty{padding:50px 28px;color:#374151;font-size:13px}
 </style>
 </head>
@@ -273,28 +308,41 @@ header h1{font-size:17px;font-weight:600;color:#f1f5f9}
 ${sections || `<div class="empty">No tickets found in ${esc(KANBAN_DIR)}</div>`}
 </div>
 <script>
-async function launch(btn, cmd) {
+async function launchAndReveal(btn, issue, cmd) {
   btn.disabled = true;
   btn.textContent = '⏳ Launching…';
-  let out = btn.closest('.test-card').querySelector('.launch-out');
-  if (!out) {
-    out = document.createElement('div');
-    out.className = 'launch-out';
-    btn.closest('.test-card').appendChild(out);
-  }
   try {
-    const r = await fetch('/launch', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({command: cmd})
-    });
+    const r = await fetch('/launch', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({command:cmd})});
     const j = await r.json();
-    if (j.ok) { out.textContent = j.output; btn.textContent = '✓ Launched'; }
-    else { out.className = 'launch-out launch-err'; out.textContent = j.error; btn.disabled = false; btn.textContent = '▶ Launch Test'; }
-  } catch(e) {
-    out.className = 'launch-out launch-err'; out.textContent = 'Request failed: ' + e.message;
-    btn.disabled = false; btn.textContent = '▶ Launch Test';
-  }
+    btn.textContent = j.ok ? '✓ Launched' : '▶ Test this feature';
+    if (!j.ok) btn.disabled = false;
+  } catch(e) { btn.disabled = false; btn.textContent = '▶ Test this feature'; }
+  revealFeedback(issue);
+}
+function revealFeedback(issue) {
+  const form = document.getElementById('fb-' + issue);
+  if (form) { form.style.display = 'flex'; form.querySelector('.fb-input').focus(); }
+}
+async function submitFeedback(issue) {
+  const form = document.getElementById('fb-' + issue);
+  const text = form.querySelector('.fb-input').value.trim();
+  if (!text) return;
+  const result = document.getElementById('fb-result-' + issue);
+  const btn = form.querySelector('.fb-submit');
+  btn.disabled = true;
+  result.textContent = 'Saving…';
+  try {
+    const r = await fetch('/feedback', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({issue, feedback:text})});
+    const j = await r.json();
+    if (j.ok) {
+      result.textContent = 'Saved. Tell the coordinator your verdict.';
+      form.querySelector('.fb-input').disabled = true;
+    } else {
+      result.style.color = '#ef4444';
+      result.textContent = j.error;
+      btn.disabled = false;
+    }
+  } catch(e) { result.style.color='#ef4444'; result.textContent='Request failed: '+e.message; btn.disabled=false; }
 }
 </script>
 </body>
@@ -385,7 +433,7 @@ a.back{color:#7c9eb5;font-size:12px;text-decoration:none}.msg{padding:40px 28px;
       `<a class="issue-badge" href="/?issue=${esc(iss)}" title="View on board">↗ ${esc(iss)}</a>`
     ).join('');
 
-    return `<div class="feature-card" style="--accent:${accent}">
+    return `<div class="feature-card" id="${esc(f.name)}" style="--accent:${accent}">
       <div class="fc-header">
         <div class="fc-accent-bar"></div>
         <div class="fc-title-row">
@@ -493,6 +541,29 @@ const server = http.createServer((req, res) => {
         res.writeHead(500, {'Content-Type':'application/json'});
         res.end(JSON.stringify({ok:false, error:e.message}));
       }
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/feedback') {
+    let body = '';
+    req.on('data', d => body += d);
+    req.on('end', () => {
+      try {
+        const { issue, feedback } = JSON.parse(body);
+        if (!issue || !feedback) { res.writeHead(400,{'Content-Type':'application/json'}); res.end(JSON.stringify({ok:false,error:'issue and feedback required'})); return; }
+        const kf = path.join(KANBAN_DIR, `${issue}.md`);
+        if (!fs.existsSync(kf)) { res.writeHead(404,{'Content-Type':'application/json'}); res.end(JSON.stringify({ok:false,error:`No kanban file for ${issue}`})); return; }
+        let content = fs.readFileSync(kf, 'utf8');
+        if (content.includes('## Feedback from user')) {
+          content = content.replace(/## Feedback from user\n[\s\S]*?(?=\n## |\s*$)/, `## Feedback from user\n${feedback}\n`);
+        } else {
+          content += `\n## Feedback from user\n${feedback}\n`;
+        }
+        fs.writeFileSync(kf, content);
+        res.writeHead(200,{'Content-Type':'application/json'});
+        res.end(JSON.stringify({ok:true}));
+      } catch(e) { res.writeHead(500,{'Content-Type':'application/json'}); res.end(JSON.stringify({ok:false,error:e.message})); }
     });
     return;
   }

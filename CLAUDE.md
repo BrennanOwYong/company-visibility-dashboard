@@ -51,7 +51,15 @@ Status values:
 - `BLOCKED_ON` — blocked on another issue's output. State the issue id and what you need from it.
 - `BUILT` — done, tests pass, ready for user testing. Triggers test card generation automatically.
 
-**Tests:** run tests using Playwright MCP or vercel/browser-agent against the live app before calling BUILT. Test your own issue only.
+**Tests:** run browser tests using agent-browser against the live app before calling BUILT. Test your own issue only.
+
+Install if missing: `npm install -g agent-browser && agent-browser install`
+
+agent-browser workflow:
+1. `agent-browser snapshot` — get accessibility tree with element refs (@e1, @e2, …)
+2. `agent-browser click @e1` / `agent-browser fill @e3 "value"` — interact
+3. `agent-browser screenshot` — capture state
+4. Re-snapshot after each interaction to verify the result
 
 **On completion — before calling BUILT:**
 - Fill `## What was built` — what the feature does from the user's perspective

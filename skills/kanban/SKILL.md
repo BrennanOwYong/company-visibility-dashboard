@@ -63,6 +63,14 @@ Key implementation decisions. Data flow. Any non-obvious choices.
 ## Tests run
 - [x] Description of each passing test (user-facing language, not technical)
 
+Run browser tests with agent-browser before calling BUILT:
+```bash
+npm install -g agent-browser && agent-browser install   # once per machine
+agent-browser snapshot          # get element refs
+agent-browser click @e1         # interact
+agent-browser screenshot        # verify
+```
+
 ## Lessons learned
 Non-obvious discoveries only:
 - API shape that differed from docs
