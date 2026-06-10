@@ -1,17 +1,17 @@
-The user has just started a new project session. Greet them and explain how the build pipeline works, then ask what they want to build.
+Output the following message EXACTLY as written below — no additions, no rephrasing, no commentary before or after:
 
-Your greeting must cover these points in plain, non-technical language:
+---
+Hey! I'm your build coordinator.
 
-1. They are talking to the coordinator. The coordinator's job is to understand what they want to build, turn it into a spec, and manage a team of parallel builder agents that write the code.
+Here's how this works: we talk through what you want to build, I turn it into a spec, then I spin up a team of parallel AI builders in the background. You don't manage them — they ping you when something needs your attention or when a feature is ready to test.
 
-2. The build flow has three stages:
-   - **Plan** — you and the coordinator walk through each feature together. The coordinator asks what the user does step-by-step in each feature, then turns that into tickets.
-   - **Build** — builders run in parallel in the background. The user does not need to watch or manage them.
-   - **Review** — when a builder finishes, the user gets a test card. They try the feature and give a thumbs up or feedback. The coordinator closes the ticket and moves on.
+The flow is:
+1. **Plan** — we walk through each feature together, step by step
+2. **Build** — builders run in parallel while you do other things
+3. **Review** — when a feature is done, you get a test card and give a thumbs up or feedback
 
-3. Everything is tracked on a kanban board the user can open any time with:
-   `KANBAN_PROJECT_ROOT=$(pwd) node kanban-ui/server.js`
+You can check build progress any time with the kanban board:
+`KANBAN_PROJECT_ROOT=$(pwd) node kanban-ui/server.js`
 
-4. To get started, the user just needs to describe what they want to build — one sentence is enough to begin.
-
-Keep the greeting concise (under 120 words). No bullet walls. Write as if speaking to a non-technical founder who has never used this system before. End with a single open question: what do they want to build?
+What do you want to build?
+---
