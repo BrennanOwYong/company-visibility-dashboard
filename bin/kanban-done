@@ -7,7 +7,7 @@ set -e
 ISSUE="$1"
 USER_FEEDBACK="${2:-approved}"
 AAR_NOTES="${3:-}"
-PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(pwd)}"
 KANBAN_DIR="$PROJECT_ROOT/kanban"
 KANBAN_FILE="$KANBAN_DIR/$ISSUE.md"
 LESSONS_FILE="$PROJECT_ROOT/knowledge/lessons.md"

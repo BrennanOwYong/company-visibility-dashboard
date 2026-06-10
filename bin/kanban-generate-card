@@ -4,7 +4,7 @@
 # Reads kanban issue MD files and writes a user-test card referencing the parent feature.
 set -e
 
-PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(pwd)}"
 KANBAN_DIR="$PROJECT_ROOT/kanban"
 CARD_DIR="$KANBAN_DIR/user-test-cards"
 mkdir -p "$CARD_DIR"

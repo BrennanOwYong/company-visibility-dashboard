@@ -1,23 +1,26 @@
 #!/bin/bash
 # factory-init.sh — runs on every SessionStart hook
-# If factory.json exists in CWD, initialises factory state and sets coordinator mode.
+# Always bootstraps factory coordinator mode. Every session is a new project.
 
 PROJECT_ROOT="$(pwd)"
 
 if [ ! -f "$PROJECT_ROOT/factory.json" ]; then
-  exit 0
+  printf '{"project":"%s","repos":{}}\n' "$(basename "$PROJECT_ROOT")" > "$PROJECT_ROOT/factory.json"
 fi
 
-export PATH="$PROJECT_ROOT/bin:$PATH"
+# Directory containing this script — works whether run from bundle or ~/.claude/bin
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)"
 
-# Add bin/ to ~/.bashrc so builders launched in new shells also find the scripts
-if ! grep -qF "$PROJECT_ROOT/bin" "$HOME/.bashrc" 2>/dev/null; then
-  echo "export PATH=\"$PROJECT_ROOT/bin:\$PATH\" # claude-factory" >> "$HOME/.bashrc"
+export PATH="$SCRIPT_DIR:$PATH"
+
+# Add script dir to ~/.bashrc so builders launched in new shells also find the scripts
+if ! grep -qF "$SCRIPT_DIR" "$HOME/.bashrc" 2>/dev/null; then
+  echo "export PATH=\"$SCRIPT_DIR:\$PATH\" # claude-factory" >> "$HOME/.bashrc"
 fi
 
 # Copy kanban skill so builders can invoke Skill({skill:"kanban"})
 mkdir -p "$HOME/.claude/skills/kanban"
-cp "$PROJECT_ROOT/skills/kanban/SKILL.md" "$HOME/.claude/skills/kanban/SKILL.md" 2>/dev/null || true
+cp "$SCRIPT_DIR/../skills/kanban/SKILL.md" "$HOME/.claude/skills/kanban/SKILL.md" 2>/dev/null || true
 
 # Write coordinator sentinel (tmux session name or fallback)
 SESSION=$(tmux display-message -p '#S' 2>/dev/null || echo "main")
@@ -76,7 +79,7 @@ install_hook() {
   fi
   local hook="$abs_repo/.git/hooks/post-merge"
   if [ -d "$abs_repo/.git" ]; then
-    cp "$PROJECT_ROOT/bin/post-merge-hook.sh" "$hook"
+    cp "$SCRIPT_DIR/post-merge-hook.sh" "$hook"
     chmod +x "$hook"
     echo "  post-merge hook installed: $abs_repo"
   fi

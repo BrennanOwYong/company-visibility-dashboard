@@ -11,7 +11,7 @@ set -e
 ISSUE="$1"
 STATUS="$2"
 NOTES="${3:-}"
-PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(pwd)}"
 KANBAN_FILE="$PROJECT_ROOT/kanban/$ISSUE.md"
 TELEMETRY_FILE="$PROJECT_ROOT/kanban/telemetry.jsonl"
 

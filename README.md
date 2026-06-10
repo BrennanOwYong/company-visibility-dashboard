@@ -1,11 +1,12 @@
 # software_factory_cc
 
-Clone this repo. Open Claude Code inside it. The factory starts automatically — no install step, no config.
+Clone this repo. Open Claude Code inside it. Type `/hi` to start.
 
 ```bash
 git clone https://github.com/BrennanOwYong/software_factory_cc.git my-project
 cd my-project
 claude .
+# then type: /hi
 ```
 
 ## Prerequisites

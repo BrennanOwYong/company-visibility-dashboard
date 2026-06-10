@@ -1,6 +1,6 @@
 #!/bin/bash
 # kanban-check — render current board state
-PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(pwd)}"
 KANBAN_DIR="$PROJECT_ROOT/kanban"
 
 if [ ! -d "$KANBAN_DIR" ]; then

@@ -8,8 +8,7 @@ const { execSync } = require('child_process');
 
 const JSON_MODE = process.argv.includes('--json');
 
-const projectRoot = process.env.KANBAN_PROJECT_ROOT ||
-  (() => { try { return execSync('git rev-parse --show-toplevel').toString().trim(); } catch { return process.cwd(); } })();
+const projectRoot = process.env.KANBAN_PROJECT_ROOT || process.cwd();
 
 const kanbanDir = path.join(projectRoot, 'kanban');
 const telemetryPath = path.join(kanbanDir, 'telemetry.jsonl');

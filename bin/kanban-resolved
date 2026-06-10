@@ -6,7 +6,7 @@ set -e
 
 FEATURE="$1"
 NOTES="${2:-unblocked}"
-PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(pwd)}"
 COORD_LOG="$PROJECT_ROOT/kanban/coordinator-log.jsonl"
 
 TS=$(date +%s%3N 2>/dev/null || python3 -c "import time; print(int(time.time()*1000))" 2>/dev/null || echo "0")
