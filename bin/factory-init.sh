@@ -22,6 +22,10 @@ fi
 mkdir -p "$HOME/.claude/skills/kanban"
 cp "$SCRIPT_DIR/../skills/kanban/SKILL.md" "$HOME/.claude/skills/kanban/SKILL.md" 2>/dev/null || true
 
+# Install /hi global slash command
+mkdir -p "$HOME/.claude/commands"
+cp "$SCRIPT_DIR/../.claude/commands/hi.md" "$HOME/.claude/commands/hi.md" 2>/dev/null || true
+
 # Write coordinator sentinel (tmux session name or fallback)
 SESSION=$(tmux display-message -p '#S' 2>/dev/null || echo "main")
 echo "$SESSION" > ~/.claude/.coordinator
