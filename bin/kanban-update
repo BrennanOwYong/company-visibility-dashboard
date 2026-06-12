@@ -44,6 +44,6 @@ if [ "$STATUS" = "BUILT" ]; then
   KANBAN_PROJECT_ROOT="$PROJECT_ROOT" kanban-generate-card "$ISSUE"
   COORDINATOR=$(cat ~/.claude/.coordinator 2>/dev/null)
   CARD="$PROJECT_ROOT/kanban/user-test-cards/$ISSUE-card.md"
-  [ -n "$COORDINATOR" ] && tmux send-keys -t "$COORDINATOR" \
-    "[$ISSUE] BUILT — user test card ready for review: $CARD" Enter
+  [ -n "$COORDINATOR" ] && KANBAN_PROJECT_ROOT="$PROJECT_ROOT" tmux-delegate "$COORDINATOR" \
+    "[$ISSUE] BUILT — user test card ready for review: $CARD"
 fi

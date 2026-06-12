@@ -1,0 +1,14 @@
+#!/bin/bash
+# Stop hook — Claude's "done talking" signal for this session.
+# Marks this agent idle and delivers one queued message, if any. Never blocks (exit 0).
+# No-op outside an active factory tmux session, so it is safe at user level.
+ROOT=$(cat "$HOME/.claude/.coordinator-root" 2>/dev/null)
+[ -z "$ROOT" ] && exit 0
+
+SESSION=$(tmux display-message -p '#S' 2>/dev/null)
+[ -z "$SESSION" ] && exit 0
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+KANBAN_PROJECT_ROOT="$ROOT" "$DIR/agent-state" "$SESSION" idle
+KANBAN_PROJECT_ROOT="$ROOT" "$DIR/inbox-drain" "$SESSION"
+exit 0

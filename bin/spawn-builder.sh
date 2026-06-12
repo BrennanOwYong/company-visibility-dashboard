@@ -3,6 +3,8 @@
 # Creates a git worktree in the specified repo, kanban issue entry, and tmux session for a builder agent.
 set -e
 
+SCRIPT_DIR_SB="$(cd "$(dirname "$0")" && pwd)"
+
 ISSUE=""
 HANDOFF=""
 PORT="3001"
@@ -112,8 +114,15 @@ tmux new-session -d -s "$ISSUE" -c "$WORKTREE_PATH" \
   -e "FEATURE_PORT=$PORT"
 
 tmux send-keys -t "$ISSUE" "claude --dangerously-skip-permissions" Enter
-sleep 4
-tmux send-keys -t "$ISSUE" "Read HANDOFF.md, AGENTS.md, modules.json, and knowledge/lessons.md. Then start building. Update kanban via: kanban-update $ISSUE <STATUS> <notes>" Enter
+
+# Bootstrap readiness: wait for the claude TUI to settle on first boot, then mark idle.
+# This one-time settle covers boot only; steady-state readiness is hook-driven (Stop=idle).
+sleep "${BUILDER_BOOT_SECONDS:-5}"
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR_SB/agent-state" "$ISSUE" idle
+
+# Deliver the first instruction through the delegator queue — never raw send-keys.
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR_SB/tmux-delegate" "$ISSUE" \
+  "Read HANDOFF.md, AGENTS.md, modules.json, and knowledge/lessons.md. Then start building. Update kanban via: kanban-update $ISSUE <STATUS> <notes>"
 
 echo ""
 echo "Builder spawned: $ISSUE"

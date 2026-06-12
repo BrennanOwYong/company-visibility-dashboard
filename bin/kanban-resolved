@@ -16,10 +16,10 @@ printf '{"ts":%s,"event":"resolved","feature":"%s","notes":%s}\n' \
   "$(printf '%s' "$NOTES" | python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" 2>/dev/null || echo '"'"$NOTES"'"')" \
   >> "$COORD_LOG"
 
-# Ping builder session if it exists
+# Ping builder session if it exists (queued via delegator, delivered when it is idle)
 if tmux has-session -t "$FEATURE" 2>/dev/null; then
-  tmux send-keys -t "$FEATURE" "Coordinator unblocked you: $NOTES — continue building." Enter
-  echo "[$FEATURE] unblocked and pinged"
+  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" tmux-delegate "$FEATURE" "Coordinator unblocked you: $NOTES — continue building."
+  echo "[$FEATURE] unblocked and queued"
 else
   echo "[$FEATURE] resolution logged (no active tmux session found)"
 fi

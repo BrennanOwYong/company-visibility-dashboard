@@ -1,0 +1,15 @@
+#!/bin/bash
+# agent-state <agent> <idle|busy>
+# Records whether an agent can receive a delegated message right now.
+# idle = done talking, safe to send. busy = mid-turn, hold.
+# Called by the agent's own Stop / UserPromptSubmit hooks and by spawn-builder.
+AGENT="$1"
+STATE="$2"
+ROOT="${KANBAN_PROJECT_ROOT:-$(cat "$HOME/.claude/.coordinator-root" 2>/dev/null)}"
+
+if [ -z "$ROOT" ] || [ -z "$AGENT" ] || [ -z "$STATE" ]; then
+  exit 0
+fi
+
+mkdir -p "$ROOT/kanban/agents"
+printf '%s\n' "$STATE" > "$ROOT/kanban/agents/$AGENT.state"

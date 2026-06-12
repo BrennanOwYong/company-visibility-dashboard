@@ -1,0 +1,40 @@
+#!/bin/bash
+# inbox-drain <agent>
+# Delivers exactly ONE queued message to an agent, and only if it is idle
+# (done talking) with a live tmux session. The agent goes busy on delivery and
+# drains the next message when it next finishes talking (its Stop hook calls this).
+# This is the readiness gate: no message ever lands on a mid-turn agent.
+AGENT="$1"
+ROOT="${KANBAN_PROJECT_ROOT:-$(cat "$HOME/.claude/.coordinator-root" 2>/dev/null)}"
+
+if [ -z "$ROOT" ] || [ -z "$AGENT" ]; then
+  exit 0
+fi
+
+STATE_FILE="$ROOT/kanban/agents/$AGENT.state"
+INBOX="$ROOT/kanban/inbox/$AGENT.jsonl"
+
+[ -s "$INBOX" ] || exit 0
+
+STATE=$(cat "$STATE_FILE" 2>/dev/null)
+[ "$STATE" = "idle" ] || exit 0
+
+tmux has-session -t "$AGENT" 2>/dev/null || exit 0
+
+MSG_JSON=$(head -n1 "$INBOX")
+[ -z "$MSG_JSON" ] && exit 0
+
+# Pop the line we are about to deliver
+tail -n +2 "$INBOX" > "$INBOX.tmp" 2>/dev/null && mv "$INBOX.tmp" "$INBOX"
+
+MSG=$(printf '%s' "$MSG_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['msg'])" 2>/dev/null)
+[ -z "$MSG" ] && exit 0
+
+# Mark busy before delivery so a racing drain backs off
+printf 'busy\n' > "$STATE_FILE"
+
+# -l sends the text literally (no tmux key-name interpretation); Enter submits it
+tmux send-keys -t "$AGENT" -l -- "$MSG"
+sleep 0.4
+tmux send-keys -t "$AGENT" Enter
+echo "[drain] delivered -> $AGENT"

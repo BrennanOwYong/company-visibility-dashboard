@@ -1,0 +1,29 @@
+#!/bin/bash
+# tmux-delegate <agent> <message...>
+# The single entry point for all delegation: agent-to-agent and script-to-agent.
+# Never call `tmux send-keys` directly anywhere else. This enqueues the message and
+# delivers it only when the target agent is idle (done talking). If the agent is busy,
+# the message waits in its inbox and its Stop hook delivers it on the next idle window.
+AGENT="$1"
+shift
+MSG="$*"
+ROOT="${KANBAN_PROJECT_ROOT:-$(cat "$HOME/.claude/.coordinator-root" 2>/dev/null)}"
+
+if [ -z "$ROOT" ] || [ -z "$AGENT" ] || [ -z "$MSG" ]; then
+  echo "Usage: tmux-delegate <agent> <message>"
+  exit 1
+fi
+
+DIR="$(cd "$(dirname "$0")" && pwd)"
+mkdir -p "$ROOT/kanban/inbox" "$ROOT/kanban/agents"
+INBOX="$ROOT/kanban/inbox/$AGENT.jsonl"
+TS=$(date +%s%3N 2>/dev/null || echo 0)
+
+LINE=$(python3 -c "import json,sys; print(json.dumps({'ts': int(sys.argv[1]), 'msg': sys.argv[2]}))" "$TS" "$MSG" 2>/dev/null)
+[ -z "$LINE" ] && LINE="{\"ts\":$TS,\"msg\":\"$MSG\"}"
+
+printf '%s\n' "$LINE" >> "$INBOX"
+echo "[delegate] queued -> $AGENT"
+
+# Attempt immediate delivery; drain no-ops if the agent is busy or not yet live
+KANBAN_PROJECT_ROOT="$ROOT" "$DIR/inbox-drain" "$AGENT"

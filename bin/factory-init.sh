@@ -26,10 +26,34 @@ cp "$SCRIPT_DIR/../skills/kanban/SKILL.md" "$HOME/.claude/skills/kanban/SKILL.md
 mkdir -p "$HOME/.claude/commands"
 cp "$SCRIPT_DIR/../.claude/commands/hi.md" "$HOME/.claude/commands/hi.md" 2>/dev/null || true
 
+# Install user-level readiness hooks so every factory agent reports when it is
+# done talking (Stop) or busy (UserPromptSubmit). Guarded: the hook scripts no-op
+# outside an active factory tmux session, so other Claude sessions are unaffected.
+# Merge into ~/.claude/settings.json without clobbering existing hooks (idempotent).
+node -e '
+  const fs=require("fs"), os=require("os"), path=require("path");
+  const f=path.join(os.homedir(),".claude","settings.json");
+  let s={}; try{ s=JSON.parse(fs.readFileSync(f,"utf8")) }catch(e){}
+  s.hooks=s.hooks||{};
+  const dir=process.argv[1];
+  function ensure(event,script){
+    s.hooks[event]=s.hooks[event]||[];
+    if(JSON.stringify(s.hooks[event]).includes(script)) return;
+    s.hooks[event].push({hooks:[{type:"command",command:"bash "+path.join(dir,script)}]});
+  }
+  ensure("Stop","hook-agent-idle");
+  ensure("UserPromptSubmit","hook-agent-busy");
+  fs.mkdirSync(path.dirname(f),{recursive:true});
+  fs.writeFileSync(f, JSON.stringify(s,null,2));
+' "$SCRIPT_DIR" 2>/dev/null || true
+
 # Write coordinator sentinel (tmux session name or fallback)
 SESSION=$(tmux display-message -p '#S' 2>/dev/null || echo "main")
 echo "$SESSION" > ~/.claude/.coordinator
 echo "$PROJECT_ROOT" > ~/.claude/.coordinator-root
+
+# Seed the coordinator's own readiness so builder pings can reach it
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/agent-state" "$SESSION" idle
 
 # Core directories
 mkdir -p "$PROJECT_ROOT/kanban/user-test-cards"
