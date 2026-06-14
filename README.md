@@ -54,7 +54,7 @@ The coordinator (Claude Opus) asks what you want to build, walks through each fe
 KANBAN_PROJECT_ROOT=$(pwd) node kanban-ui/server.js
 ```
 
-Opens at `http://localhost:2999`. Shows all tickets by status, the feature each belongs to, test card content for BUILT tickets, and a Launch Test button. The PRD (product requirements) page is linked from the header.
+Opens at `http://localhost:2999`. Shows all tickets by status, the feature each belongs to, test card content for NEEDS_TESTING tickets, and a Launch Test button. The PRD (product requirements) page is linked from the header.
 
 ## Kanban scripts
 
@@ -62,21 +62,23 @@ Scripts live in `bin/`. They are added to your PATH automatically on first sessi
 
 | Script | Who calls it | What it does |
 |---|---|---|
-| `kanban-update <issue> <status> [notes]` | Builder | Updates ticket status; BUILT triggers test card |
+| `kanban-update <issue> <status> [notes]` | Builder | Updates ticket status; NEEDS_TESTING assigns a port + triggers test card |
 | `kanban-check` | Anyone | Prints board state to terminal |
 | `kanban-done <issue> <feedback>` | Coordinator | Writes after-action report, marks COMPLETE |
-| `kanban-generate-card <issue>` | Auto on BUILT | Writes user test card |
-| `kanban-resolved <issue>` | Coordinator | Unblocks a BLOCKED_ON ticket |
+| `kanban-generate-card <issue>` | Auto on NEEDS_TESTING | Writes user test card |
+| `kanban-resolved <issue>` | Coordinator | Resumes a NEEDS_SETUP ticket after the user does the setup |
+| `kanban-dispatch [manifest]` | Coordinator | Spawns one builder per ticket from kanban/dispatch.json |
 | `kanban-perf` | Anyone | Timing report from telemetry |
-| `spawn-builder.sh` | Coordinator | Creates worktree + kanban entry + tmux session |
+| `spawn-builder.sh` | kanban-dispatch | Creates worktree + kanban entry + tmux session (once per agent) |
 | `factory-init.sh` | SessionStart hook | Registers coordinator, installs post-merge hooks |
 
 ## Ticket lifecycle
 
 ```
-spawn-builder  →  IN_PROGRESS
-builder works  →  kanban-update IN_PROGRESS / NEEDS_ACTION / BLOCKED_ON
-tests pass     →  kanban-update BUILT  (test card generated, coordinator pinged)
+spawn-builder  →  NOT_STARTED
+builder begins →  kanban-update IN_PROGRESS
+needs infra    →  kanban-update NEEDS_SETUP  (user sets up external infra, then resume)
+build done     →  kanban-update NEEDS_TESTING  (port assigned, test card generated, coordinator pinged)
 user approves  →  kanban-done  (after-action report written, ticket COMPLETE)
 ```
 
@@ -109,7 +111,7 @@ Reads `kanban/*.md` in the project root and serves a status board at `http://loc
 KANBAN_PROJECT_ROOT=/path/to/your/project node kanban-ui/server.js
 ```
 
-The UI shows tickets by status, the feature each ticket belongs to, test card content for BUILT tickets, and a Launch Test button that runs the builder's `test_command` in the background.
+The UI shows tickets by status, the feature each ticket belongs to, test card content for NEEDS_TESTING tickets, and a Launch Test button that runs the builder's `test_command` in the background.
 
 ## Kanban scripts
 
@@ -117,22 +119,24 @@ All scripts live in `~/.claude/bin/` after install. Builders invoke them via the
 
 | Script | Who calls it | What it does |
 |---|---|---|
-| `kanban-update <issue> <status> [notes]` | Builder | Updates ticket status; BUILT triggers test card generation |
+| `kanban-update <issue> <status> [notes]` | Builder | Updates ticket status; NEEDS_TESTING assigns a port + triggers test card generation |
 | `kanban-check` | Anyone | Renders current board state in the terminal |
 | `kanban-done <issue> <feedback>` | Coordinator | Writes after-action report, extracts lessons, marks COMPLETE |
-| `kanban-generate-card <issue>` | Auto (on BUILT) | Writes user test card to `kanban/user-test-cards/` |
-| `kanban-resolved <issue>` | Coordinator | Unblocks a BLOCKED_ON ticket and pings the builder |
+| `kanban-generate-card <issue>` | Auto (on NEEDS_TESTING) | Writes user test card to `kanban/user-test-cards/` |
+| `kanban-resolved <issue>` | Coordinator | Resumes a NEEDS_SETUP ticket after the user does the setup, pings the builder |
+| `kanban-dispatch [manifest]` | Coordinator | Spawns one builder per ticket from `kanban/dispatch.json` |
 | `kanban-perf` | Anyone | Timing report from telemetry |
 | `kanban-eval` | Anyone | Quality report |
-| `spawn-builder.sh` | Coordinator | Creates worktree + kanban entry + tmux session |
+| `spawn-builder.sh` | kanban-dispatch | Creates worktree + kanban entry + tmux session (once per agent) |
 | `factory-init.sh` | SessionStart hook | Registers coordinator session, installs post-merge hooks |
 
 ## Ticket lifecycle
 
 ```
-spawn-builder → IN_PROGRESS
-builder works → kanban-update IN_PROGRESS / NEEDS_ACTION / BLOCKED_ON
-tests pass    → kanban-update BUILT  (auto-generates test card, pings coordinator)
+spawn-builder → NOT_STARTED
+builder begins → kanban-update IN_PROGRESS
+needs infra   → kanban-update NEEDS_SETUP  (user sets up external infra, then resume)
+build done    → kanban-update NEEDS_TESTING  (port assigned, test card generated, coordinator pinged)
 user approves → kanban-done  (writes after-action report, marks COMPLETE)
 ```
 

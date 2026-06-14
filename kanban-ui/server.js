@@ -109,7 +109,7 @@ function readTickets() {
       return {
         issue: id,
         feature: fm.feature || '',
-        status: fm.status || 'UNSTARTED',
+        status: fm.status || 'NOT_STARTED',
         port: fm.port || '',
         test_command: fm.test_command || '',
         dependsOn: fm.dependsOn || '',
@@ -241,13 +241,13 @@ function renderTicketCard(t, context, allTickets) {
 function renderPage(tickets) {
   const projectName = path.basename(PROJECT_ROOT);
 
-  const unstarted    = tickets.filter(t => t.status === 'UNSTARTED');
+  const unstarted    = tickets.filter(t => t.status === 'NOT_STARTED');
   const inProgress   = tickets.filter(t => t.status === 'IN_PROGRESS');
-  const blocked      = tickets.filter(t => ['NEEDS_ACTION', 'BLOCKED_ON'].includes(t.status));
-  const needsReview  = tickets.filter(t => t.status === 'BUILT');
+  const blocked      = tickets.filter(t => t.status === 'NEEDS_SETUP');
+  const needsReview  = tickets.filter(t => t.status === 'NEEDS_TESTING');
   const complete     = tickets.filter(t => t.status === 'COMPLETE');
   // Anything else → in-progress
-  const unknown      = tickets.filter(t => !['UNSTARTED','IN_PROGRESS','NEEDS_ACTION','BLOCKED_ON','BUILT','COMPLETE'].includes(t.status));
+  const unknown      = tickets.filter(t => !['NOT_STARTED','IN_PROGRESS','NEEDS_SETUP','NEEDS_TESTING','COMPLETE'].includes(t.status));
 
   const allInProgress = [...inProgress, ...unknown];
 
@@ -280,12 +280,12 @@ function renderPage(tickets) {
         <div class="blocked-slide-inner" id="blocked-slide">
           <span class="slide-face">
             <span class="dot" style="background:#ef4444"></span>
-            Blocked
+            Needs Setup
             <span class="count">${blocked.length}</span>
           </span>
           <span class="slide-face">
             <span class="dot" style="background:#8b5cf6"></span>
-            Needs Review
+            Needs Testing
             <span class="count">${needsReview.length}</span>
           </span>
         </div>

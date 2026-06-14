@@ -67,3 +67,25 @@ Not designed yet. KIV until the factory is used in a team setting with a remote 
 ## 6. RBAC'd SOP and company data
 
 RBAC'd SOP and company data.
+
+---
+
+## 7. tmux session liveness ↔ kanban state mapping
+
+The dispatcher's status view originally reconciled tmux session liveness against
+declared kanban status to derive a `DEAD` state (session gone before testing).
+Pulled out — the mapping depends on an unresolved architecture question:
+
+- **Single agent per feature module** — one tmux session owns one ticket for its
+  whole life, so session-gone-before-complete cleanly means that ticket died.
+- **Single agent builds many features** — one session spans multiple tickets, so
+  session liveness no longer maps 1:1 to a ticket's state and "dead" is ambiguous.
+
+No conclusive performance evidence yet on which model is better. Until that lands,
+do NOT couple tmux liveness to kanban state. Kanban status (declared by the agent)
+is the only source of truth for a ticket's state; `kanban-check` shows the board
+from declared status alone.
+
+**Why:** user is researching the agent↔feature mapping; performance inconclusive.
+**How to apply:** keep liveness/crash detection out of dispatch and status views
+until the mapping is decided. Revisit `DEAD`/restart logic then.

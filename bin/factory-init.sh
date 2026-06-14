@@ -13,6 +13,10 @@ SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && 
 
 export PATH="$SCRIPT_DIR:$PATH"
 
+# The whole system invokes these scripts bare by name via PATH; ensure they are
+# executable even if the checkout dropped the exec bit.
+chmod +x "$SCRIPT_DIR"/* 2>/dev/null || true
+
 # Add script dir to ~/.bashrc so builders launched in new shells also find the scripts
 if ! grep -qF "$SCRIPT_DIR" "$HOME/.bashrc" 2>/dev/null; then
   echo "export PATH=\"$SCRIPT_DIR:\$PATH\" # claude-factory" >> "$HOME/.bashrc"

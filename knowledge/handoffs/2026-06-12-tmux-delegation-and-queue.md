@@ -124,60 +124,71 @@ The third phase box (`KANBAN DISPATCH — a SCRIPT, not an agent`) is now built 
 first instruction); `kanban-dispatch` turns the architect's whole output into all
 the builders and reports their combined state.
 
-### Architect → Dispatch contract (the missing interface, now defined)
+### CANONICAL STATE VOCABULARY (corrected by user 2026-06-14)
+Single-token (UPPERCASE_SNAKE, so `awk '{print $2}'` parsing holds), pipeline order:
+`NOT_STARTED → IN_PROGRESS → NEEDS_SETUP → NEEDS_TESTING → COMPLETE`
+- `NOT_STARTED` — spawn-builder seeds this; agent has not begun.
+- `IN_PROGRESS` — building.
+- `NEEDS_SETUP` — paused: user must set up external infra the agent cannot (was NEEDS_ACTION).
+- `NEEDS_TESTING` — build done, ready to test (was BUILT). Assigns a port + test card.
+- `COMPLETE` — user approved.
+`BLOCKED_ON` is REMOVED — the contract-mock model means builders never wait on each
+other. Migrated across all runtime scripts, the UI, telemetry tools, CLAUDE.md, SKILL,
+HANDOFF template, README. (Inference flagged to user: BLOCKED_ON dropped because the
+5-state list was given as complete; consistent with the locked contract decoupling.)
+
+### Port timing (corrected by user 2026-06-14)
+A port is a TESTING-phase resource. It is NOT assigned at spawn/dispatch. It is
+allocated only at the `NEEDS_TESTING` transition, by `kanban-update`: first free port
+from 3001 up, skipping ports already held by other tickets, written to the kanban file.
+spawn-builder no longer sets a port or FEATURE_PORT. The manifest carries no ports.
+
+### Architect → Dispatch contract
 The architect's machine-readable deliverable is a **dispatch manifest** at
 `kanban/dispatch.json`. Schema: `templates/dispatch.template.json`.
 ```
-{ "basePort": 3001, "defaultRepo": "<abs path or "">",
-  "tickets": [ { "issue", "feature", "handoff", "dependsOn":[], "port":null, "repo":null } ] }
+{ "defaultRepo": "<abs path or "">",
+  "tickets": [ { "issue", "feature", "handoff", "dependsOn":[], "repo":null } ] }
 ```
-- `port` null → auto-assigned sequentially from `basePort`, skipping any pinned ports.
 - `handoff` is project-root-relative or absolute; must exist or the ticket is skipped.
 - `dependsOn` is recorded on the kanban ticket (used later by kanban-done's cluster
-  check). It does NOT gate spawning — the contract model decouples tickets, so all
-  builders launch in parallel, each mocking its dependencies.
-- The manifest existing + valid is the artifact that triggers this phase. The
-  architect writes it; the trigger that runs `kanban-dispatch` after the architect's
-  Stop is the remaining phase-wiring TODO below.
+  check). It does NOT gate spawning — all builders launch in parallel, each mocking deps.
+- spawn-builder is called once per ticket (per-agent, tracked). That single-spawn shape
+  is intended; the dispatcher just iterates it.
 
 ### Commands
 - `kanban-dispatch [manifest]` — dispatch every not-yet-dispatched ticket. Idempotent
-  (skips tickets that already have a `kanban/<issue>.md`), so safe to re-run as the
-  architect appends tickets. Logs to `kanban/dispatch-log.jsonl`.
-- `kanban-dispatch --status` — reconciles declared status + tmux liveness + readiness
-  into one effective state per ticket. Manifest parse uses `\x1f` field separator so
-  empty fields never collapse.
+  (skips tickets that already have a `kanban/<issue>.md`). Logs to `kanban/dispatch-log.jsonl`.
 - `kanban-dispatch --dry-run` — preview spawns, launch nothing.
 - `kanban-dispatch --force` — re-dispatch even tickets with an existing entry.
+- Board view is `kanban-check`. The dispatcher no longer has a `--status` mode.
 
-### Complete state set (answers "report all possible states")
-Declared statuses (`IN_PROGRESS / NEEDS_ACTION / BLOCKED_ON / BUILT / COMPLETE`) plus
-two the dispatcher derives by reconciliation:
-- `PENDING` — in the manifest, no kanban entry yet (not dispatched).
-- `DEAD` — kanban status is non-terminal but the tmux session is gone (builder
-  crashed or exited before BUILT). This was the prior blind spot — declared status
-  alone could not see a builder that died. `--status` flags the count and tells you
-  to investigate then `--force` re-dispatch. `BUILT`/`COMPLETE` with a gone session
-  are correctly NOT dead (the session is just closed).
+### tmux liveness ↔ kanban state is KIV (item 7)
+The earlier `--status`/`DEAD` reconciliation (deriving "session gone before testing")
+was REMOVED. Whether liveness maps to a ticket's state depends on the unresolved
+single-agent-per-module vs single-agent-many-features question (user researching,
+performance inconclusive). Until decided: kanban status declared by the agent is the
+only source of truth; do not couple tmux liveness to state. See KIV.md item 7.
 
-### Tests run (2026-06-13)
-- Port auto-assignment skips pinned ports (3001 auto, 3005 pinned). PASS
-- Missing handoff → ticket skipped, not spawned. PASS
-- `\x1f` separator: empty dependsOn no longer swallows repo field. PASS (was a bug, fixed)
-- Idempotency: tickets with an existing kanban entry skipped, no dispatch-log written. PASS
-- State reconciliation across IN_PROGRESS(alive), DEAD(gone+non-terminal), PENDING,
-  BLOCKED_ON(alive, inbox depth shown), BUILT(gone, not dead), COMPLETE. PASS
-- Not exercised here: the real `spawn-builder` shell-out (launches actual claude);
-  arg construction verified via --dry-run, queue path tested in prior session.
+### Tests run (2026-06-13 dispatch + 2026-06-14 vocab/port)
+- Dispatcher: missing handoff skipped; `\x1f` separator keeps empty dependsOn from
+  swallowing repo (was a bug, fixed); idempotency skip; dry-run arg construction. PASS
+- Port assigned ONLY at NEEDS_TESTING; IN_PROGRESS leaves port empty; allocator skips a
+  port already held (→ 3002, 3003); re-NEEDS_TESTING keeps the same port. PASS
+- kanban-check renders new vocabulary; card + coordinator ping fire on NEEDS_TESTING. PASS
+- All changed shell + node files syntax-clean.
+- Latent bug fixed: bin scripts were committed non-executable (100644) but invoked bare
+  by name via PATH → would fail "Permission denied" in a real session. Now 100755 +
+  factory-init chmods on install.
+- Not exercised: real `spawn-builder` shell-out (launches actual claude); arg
+  construction verified via --dry-run, queue path tested in prior session.
 
 ## Still TODO (next agent / next session)
 - Wire the actual phase agents: spawn a persistent `architect` tmux session and have the PM
   delegate to it via `tmux-delegate`; on the architect's deliverable, trigger kanban dispatch.
-- Decide the PM->Architect trigger (PM does it on requirements sign-off) and the
-  Architect->kanban trigger: when the architect writes `kanban/dispatch.json` and finishes
-  (Stop), run `kanban-dispatch`. The dispatch script and its manifest contract are DONE; only
-  the auto-fire on the architect's deliverable remains.
-- `DEAD` recovery is manual today (`--force` re-dispatch). A future pass could auto-restart
-  a dead builder, but keep that out until the phase wiring lands.
-- Update CLAUDE.md coordinator rules to describe the PM/Architect/kanban phase model and to
-  mandate `tmux-delegate` for every delegation (ban raw send-keys).
+- Architect->kanban trigger: when the architect writes `kanban/dispatch.json` and finishes
+  (Stop), run `kanban-dispatch`. The dispatch script + manifest contract are DONE; only the
+  auto-fire on the architect's deliverable remains.
+- Define the TESTING phase itself: who serves the app on the assigned port and who runs the
+  test (tester agent vs user). Port allocation at NEEDS_TESTING is in place; the consumer is not.
+- Resolve KIV item 7 (agent↔feature mapping) before adding any liveness/crash detection.

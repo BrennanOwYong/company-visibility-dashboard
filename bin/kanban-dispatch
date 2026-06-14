@@ -3,14 +3,16 @@
 #
 # Reads the architect's dispatch manifest and spawns one interactive Claude Code
 # builder per ticket: git worktree + tmux session + context provision, all via
-# spawn-builder.sh. Ports are auto-assigned from basePort upward. Dispatch is
-# idempotent — a ticket that already has a kanban entry is skipped, so the script
-# is safe to re-run as the architect appends new tickets.
+# spawn-builder.sh (called once per agent). Dispatch is idempotent — a ticket that
+# already has a kanban entry is skipped, so the script is safe to re-run as the
+# architect appends new tickets.
+#
+# Ports are NOT assigned here. A port is a testing-phase resource, assigned at the
+# NEEDS_TESTING transition (see kanban-update). The board view is `kanban-check`;
+# tmux liveness is deliberately NOT mapped to kanban state (see KIV item 7).
 #
 # Usage:
 #   kanban-dispatch [manifest]            dispatch every not-yet-dispatched ticket
-#   kanban-dispatch --status   [manifest] reconcile declared status against tmux
-#                                         liveness and report every possible state
 #   kanban-dispatch --dry-run  [manifest] show what would be dispatched, spawn nothing
 #   kanban-dispatch --force    [manifest] re-dispatch even tickets with a kanban entry
 #
@@ -26,7 +28,6 @@ FORCE="0"
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --status)  MODE="status"; shift;;
     --dry-run) MODE="dryrun"; shift;;
     --force)   FORCE="1"; shift;;
     *)         MANIFEST="$1"; shift;;
@@ -35,123 +36,32 @@ done
 
 MANIFEST="${MANIFEST:-$PROJECT_ROOT/kanban/dispatch.json}"
 
-# normalize_manifest — emit one record per ticket with ports resolved.
-# Fields are separated by US (\x1f), a non-whitespace control char, so empty
-# fields (e.g. no dependsOn) are preserved and never collapsed by read/IFS.
-#   issue \x1f feature \x1f handoff \x1f port \x1f dependsOn(csv) \x1f repo
+# normalize_manifest — emit one record per ticket. Fields are separated by US
+# (\x1f), a non-whitespace control char, so empty fields (e.g. no dependsOn) are
+# preserved and never collapsed by read/IFS.
+#   issue \x1f feature \x1f handoff \x1f dependsOn(csv) \x1f repo
 normalize_manifest() {
   python3 - "$MANIFEST" << 'PY'
 import json, sys
-path = sys.argv[1]
-with open(path) as f:
+with open(sys.argv[1]) as f:
     m = json.load(f)
-base = int(m.get("basePort", 3001))
 default_repo = m.get("defaultRepo") or ""
-tickets = m.get("tickets", [])
-
-used = set()
-for t in tickets:
-    p = t.get("port")
-    if p:
-        used.add(int(p))
-
-nxt = base
-def alloc():
-    global nxt
-    while nxt in used:
-        nxt += 1
-    used.add(nxt)
-    port = nxt
-    nxt += 1
-    return port
-
 SEP = "\x1f"
-for t in tickets:
+for t in m.get("tickets", []):
     issue = (t.get("issue") or "").strip()
     if not issue:
         continue
     feature = (t.get("feature") or issue).strip()
     handoff = (t.get("handoff") or "").strip()
-    port = t.get("port") or alloc()
     deps = t.get("dependsOn") or []
     if isinstance(deps, str):
         deps = [d.strip() for d in deps.split(",") if d.strip()]
     deps_csv = ",".join(deps)
     repo = (t.get("repo") or default_repo or "").strip()
-    print(SEP.join([issue, feature, handoff, str(port), deps_csv, repo]))
+    print(SEP.join([issue, feature, handoff, deps_csv, repo]))
 PY
 }
 
-# ── STATUS MODE ───────────────────────────────────────────────────────────────
-# Reconciles three sources of truth into one effective state per ticket:
-#   declared status (kanban/<issue>.md)  +  tmux session liveness  +  readiness
-#
-# Effective states (the complete set a dispatched task can be in):
-#   PENDING       in manifest, no kanban entry yet — not dispatched
-#   IN_PROGRESS   building, session alive
-#   NEEDS_ACTION  blocked on human/external, session alive
-#   BLOCKED_ON    blocked on another ticket, session alive
-#   BUILT         done, awaiting user test
-#   COMPLETE      user approved, closed
-#   DEAD          session gone AND status not terminal — builder crashed/exited
-if [ "$MODE" = "status" ]; then
-  KANBAN_DIR="$PROJECT_ROOT/kanban"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo " DISPATCH STATUS — $(basename "$PROJECT_ROOT")"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  printf "  %-26s %-13s %-7s %-6s %s\n" "TICKET" "STATE" "SESSION" "READY" "INBOX"
-  echo "  ────────────────────────────────────────────────────────────"
-
-  # Union of manifest issues and existing kanban entries
-  ISSUES=$(mktemp)
-  if [ -f "$MANIFEST" ]; then
-    normalize_manifest | cut -d$'\x1f' -f1 >> "$ISSUES"
-  fi
-  for f in "$KANBAN_DIR"/*.md; do
-    [ -f "$f" ] || continue
-    b=$(basename "$f" .md)
-    case "$b" in *-card|*-aar) continue;; esac
-    echo "$b" >> "$ISSUES"
-  done
-  SORTED=$(sort -u "$ISSUES"); rm -f "$ISSUES"
-
-  DEAD_COUNT=0
-  while IFS= read -r issue; do
-    [ -z "$issue" ] && continue
-    KFILE="$KANBAN_DIR/$issue.md"
-    if [ -f "$KFILE" ]; then
-      declared=$(grep "^status:" "$KFILE" | awk '{print $2}')
-    else
-      declared=""
-    fi
-    if tmux has-session -t "$issue" 2>/dev/null; then alive="alive"; else alive="gone"; fi
-    ready=$(cat "$KANBAN_DIR/agents/$issue.state" 2>/dev/null || echo "-")
-    inbox="$KANBAN_DIR/inbox/$issue.jsonl"
-    depth=$([ -f "$inbox" ] && wc -l < "$inbox" | tr -d ' ' || echo 0)
-
-    if [ ! -f "$KFILE" ]; then
-      state="PENDING"
-    elif [ "$declared" = "BUILT" ] || [ "$declared" = "COMPLETE" ]; then
-      state="$declared"
-    elif [ "$alive" = "alive" ]; then
-      state="$declared"
-    else
-      state="DEAD"
-      DEAD_COUNT=$((DEAD_COUNT+1))
-    fi
-
-    printf "  %-26s %-13s %-7s %-6s %s\n" "$issue" "$state" "$alive" "$ready" "$depth"
-  done <<< "$SORTED"
-
-  echo ""
-  if [ "$DEAD_COUNT" -gt 0 ]; then
-    echo "  ⚠ $DEAD_COUNT ticket(s) DEAD — session exited before BUILT. Re-dispatch with --force after investigating."
-  fi
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  exit 0
-fi
-
-# ── DISPATCH / DRY-RUN MODE ─────────────────────────────────────────────────────
 if [ ! -f "$MANIFEST" ]; then
   echo "No dispatch manifest at: $MANIFEST"
   echo "The architect writes it. Schema: templates/dispatch.template.json"
@@ -167,7 +77,7 @@ SKIPPED=0
 DISPATCH_LOG="$PROJECT_ROOT/kanban/dispatch-log.jsonl"
 mkdir -p "$PROJECT_ROOT/kanban"
 
-while IFS=$'\x1f' read -r ISSUE FEATURE HANDOFF PORT DEPS REPO; do
+while IFS=$'\x1f' read -r ISSUE FEATURE HANDOFF DEPS REPO; do
   [ -z "$ISSUE" ] && continue
 
   # Resolve a relative handoff path against the project root
@@ -189,22 +99,22 @@ while IFS=$'\x1f' read -r ISSUE FEATURE HANDOFF PORT DEPS REPO; do
     continue
   fi
 
-  ARGS=("$ISSUE" "$HPATH" --port "$PORT" --feature "$FEATURE")
+  ARGS=("$ISSUE" "$HPATH" --feature "$FEATURE")
   [ -n "$DEPS" ] && ARGS+=(--depends-on "$DEPS")
   [ -n "$REPO" ] && ARGS+=(--repo "$REPO")
 
   if [ "$MODE" = "dryrun" ]; then
-    echo "  → would spawn: $ISSUE  feature:$FEATURE  port:$PORT  deps:[${DEPS:-none}]  repo:${REPO:-(project root)}"
+    echo "  → would spawn: $ISSUE  feature:$FEATURE  deps:[${DEPS:-none}]  repo:${REPO:-(project root)}"
     DISPATCHED=$((DISPATCHED+1))
     continue
   fi
 
-  echo "  → dispatching $ISSUE (port $PORT) ..."
+  echo "  → dispatching $ISSUE ..."
   if ( cd "$PROJECT_ROOT" && KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/spawn-builder.sh" "${ARGS[@]}" ); then
     DISPATCHED=$((DISPATCHED+1))
     TS=$(date +%s%3N 2>/dev/null || echo 0)
-    printf '{"ts":%s,"issue":"%s","feature":"%s","port":%s,"dependsOn":"%s"}\n' \
-      "$TS" "$ISSUE" "$FEATURE" "$PORT" "$DEPS" >> "$DISPATCH_LOG"
+    printf '{"ts":%s,"issue":"%s","feature":"%s","dependsOn":"%s"}\n' \
+      "$TS" "$ISSUE" "$FEATURE" "$DEPS" >> "$DISPATCH_LOG"
   else
     echo "  ✗ $ISSUE — spawn-builder failed"
     SKIPPED=$((SKIPPED+1))
@@ -215,5 +125,5 @@ echo ""
 echo "Dispatched: $DISPATCHED   Skipped: $SKIPPED"
 if [ "$MODE" != "dryrun" ] && [ "$DISPATCHED" -gt 0 ]; then
   echo ""
-  echo "Run 'kanban-dispatch --status' to watch state, or 'kanban-check' for the board."
+  echo "Run 'kanban-check' for the board."
 fi

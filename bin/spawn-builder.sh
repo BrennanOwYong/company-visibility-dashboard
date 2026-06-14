@@ -7,7 +7,7 @@ SCRIPT_DIR_SB="$(cd "$(dirname "$0")" && pwd)"
 
 ISSUE=""
 HANDOFF=""
-PORT="3001"
+PORT=""   # assigned later, at the NEEDS_TESTING transition — not at spawn
 REPO_ROOT=""
 DEPENDS_ON=""
 FEATURE_NAME=""
@@ -79,7 +79,7 @@ issue: $ISSUE
 feature: $FEATURE_NAME
 port: $PORT
 repo: $REPO_ROOT
-status: IN_PROGRESS
+status: NOT_STARTED
 branch: feat/$ISSUE
 worktree: $WORKTREE_PATH
 dependsOn: $DEPENDS_ON
@@ -106,12 +106,12 @@ test_command:
 (none)
 EOF
 
-# Create tmux session
+# Create tmux session. No FEATURE_PORT — a port is assigned at the NEEDS_TESTING
+# transition (see kanban-update) and read from the kanban file when testing begins.
 tmux new-session -d -s "$ISSUE" -c "$WORKTREE_PATH" \
   -e "PATH=$PROJECT_ROOT/bin:$PATH" \
   -e "KANBAN_PROJECT_ROOT=$PROJECT_ROOT" \
-  -e "FEATURE_NAME=$ISSUE" \
-  -e "FEATURE_PORT=$PORT"
+  -e "FEATURE_NAME=$ISSUE"
 
 tmux send-keys -t "$ISSUE" "claude --dangerously-skip-permissions" Enter
 
@@ -122,7 +122,7 @@ KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR_SB/agent-state" "$ISSUE" idle
 
 # Deliver the first instruction through the delegator queue — never raw send-keys.
 KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR_SB/tmux-delegate" "$ISSUE" \
-  "Read HANDOFF.md, AGENTS.md, modules.json, and knowledge/lessons.md. Then start building. Update kanban via: kanban-update $ISSUE <STATUS> <notes>"
+  "Read HANDOFF.md, AGENTS.md, modules.json, and knowledge/lessons.md. Mark started with: kanban-update $ISSUE IN_PROGRESS \"starting\". Then build. States: IN_PROGRESS while building, NEEDS_SETUP if you need the user to set up external infra you cannot, NEEDS_TESTING when the build is done and ready to test (a port is assigned then)."
 
 echo ""
 echo "Builder spawned: $ISSUE"
@@ -130,7 +130,7 @@ echo "  Feature    : $FEATURE_NAME"
 echo "  Worktree   : $WORKTREE_PATH"
 echo "  Branch     : feat/$ISSUE"
 echo "  Repo       : $REPO_ROOT"
-echo "  Port       : $PORT"
+echo "  Port       : ${PORT:-(assigned at testing)}"
 echo "  DependsOn  : ${DEPENDS_ON:-(none)}"
 echo "  Kanban     : $PROJECT_ROOT/kanban/$ISSUE.md"
 echo "  Watch      : tmux attach -t $ISSUE"

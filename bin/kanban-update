@@ -1,11 +1,12 @@
 #!/bin/bash
 # kanban-update <issue> <status> [notes]
-# Any status string is valid. Structured values used by kanban-eval:
-#   IN_PROGRESS  — actively building
-#   NEEDS_ACTION — blocked on human/external action (state exactly what + who)
-#   BLOCKED_ON   — waiting on another issue's output (state issue id + what you need)
-#   BUILT        — builder done, tests pass, ready for user testing (triggers test card)
-#   COMPLETE     — coordinator closes after user approval (use kanban-done instead)
+# Canonical state vocabulary (in pipeline order):
+#   NOT_STARTED   — ticket exists, agent has not begun
+#   IN_PROGRESS   — actively building
+#   NEEDS_SETUP   — paused: user must set up external infra the agent cannot (state what + who)
+#   NEEDS_TESTING — build done, ready for the testing phase. Assigns a port, generates the
+#                   test card, pings the coordinator.
+#   COMPLETE      — coordinator closes after user approval (use kanban-done instead)
 set -e
 
 ISSUE="$1"
@@ -39,11 +40,24 @@ printf '{"ts":%s,"issue":"%s","from":"%s","to":"%s","notes":%s}\n' \
 
 echo "[$ISSUE] $STATUS${NOTES:+ — $NOTES}"
 
-# BUILT triggers test card generation and coordinator ping
-if [ "$STATUS" = "BUILT" ]; then
+# NEEDS_TESTING is the only point a port is assigned — a port is a testing-phase
+# resource (serving the built app), not needed during the build. Allocate the first
+# free port from 3001 upward, skipping ports already held by other tickets.
+if [ "$STATUS" = "NEEDS_TESTING" ]; then
+  CURRENT_PORT=$(grep "^port:" "$KANBAN_FILE" | awk '{print $2}')
+  if [ -z "$CURRENT_PORT" ]; then
+    USED=$(grep -h "^port:" "$PROJECT_ROOT/kanban/"*.md 2>/dev/null | awk '{print $2}' | grep -E '^[0-9]+$' | sort -un)
+    PORT=3001
+    while echo "$USED" | grep -qx "$PORT"; do PORT=$((PORT+1)); done
+    sed -i "s/^port:.*/port: $PORT/" "$KANBAN_FILE"
+    echo "[$ISSUE] assigned port $PORT for testing"
+  else
+    PORT="$CURRENT_PORT"
+  fi
+
   KANBAN_PROJECT_ROOT="$PROJECT_ROOT" kanban-generate-card "$ISSUE"
   COORDINATOR=$(cat ~/.claude/.coordinator 2>/dev/null)
   CARD="$PROJECT_ROOT/kanban/user-test-cards/$ISSUE-card.md"
   [ -n "$COORDINATOR" ] && KANBAN_PROJECT_ROOT="$PROJECT_ROOT" tmux-delegate "$COORDINATOR" \
-    "[$ISSUE] BUILT — user test card ready for review: $CARD"
+    "[$ISSUE] NEEDS_TESTING (port $PORT) — user test card ready for review: $CARD"
 fi

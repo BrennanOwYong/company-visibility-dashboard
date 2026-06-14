@@ -12,7 +12,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo " KANBAN — $(basename $PROJECT_ROOT)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-for STATUS in IN_PROGRESS NEEDS_ACTION BLOCKED_ON BUILT COMPLETE; do
+for STATUS in NOT_STARTED IN_PROGRESS NEEDS_SETUP NEEDS_TESTING COMPLETE; do
   FILES=$(grep -rl "^status: $STATUS" "$KANBAN_DIR" 2>/dev/null | grep -v user-test-cards | grep -v aar || true)
   if [ -n "$FILES" ]; then
     echo ""

@@ -38,13 +38,13 @@ for (const [name, evs] of Object.entries(features)) {
 
   const totalMs = (startEv && completeEv) ? completeEv.ts - startEv.ts : null;
 
-  // Blocked time: sum of durations where from=BLOCKED_ON
+  // Paused time: sum of durations spent in NEEDS_SETUP (waiting on the user)
   let blockedMs = 0;
   let blockCount = 0;
   let inBlockSince = null;
   for (const ev of evs) {
-    if (ev.to === 'BLOCKED_ON') { inBlockSince = ev.ts; blockCount++; }
-    if (ev.from === 'BLOCKED_ON' && inBlockSince) { blockedMs += ev.ts - inBlockSince; inBlockSince = null; }
+    if (ev.to === 'NEEDS_SETUP') { inBlockSince = ev.ts; blockCount++; }
+    if (ev.from === 'NEEDS_SETUP' && inBlockSince) { blockedMs += ev.ts - inBlockSince; inBlockSince = null; }
   }
 
   const transitions = evs.map(e => ({ from: e.from, to: e.to, ts: e.ts, notes: e.notes }));

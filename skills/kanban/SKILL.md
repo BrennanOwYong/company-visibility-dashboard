@@ -10,28 +10,30 @@ It contains: issue id, parent feature name, port, repo, status, dependencies, an
 ## Lifecycle — builder's view
 
 ```
-spawn-builder creates your issue  →  status: IN_PROGRESS
+spawn-builder creates your issue  →  status: NOT_STARTED
+You begin                         →  kanban-update $FEATURE_NAME IN_PROGRESS "starting"
 You build                         →  kanban-update $FEATURE_NAME IN_PROGRESS "what you're doing"
-You hit a blocker
-  human/external needed           →  kanban-update $FEATURE_NAME NEEDS_ACTION "who must do what"
-  waiting on another issue        →  kanban-update $FEATURE_NAME BLOCKED_ON "ISS-id: what you need"
-  coordinator unblocks you        →  kanban-resolved is called for you, resume work
-You finish building + tests pass  →  fill kanban sections, then:
-                                     kanban-update $FEATURE_NAME BUILT "summary"
-                                     ← this auto-generates the test card and pings coordinator
-You DO NOT call kanban-done       →  coordinator calls it after user approves
+You need external infra set up     →  kanban-update $FEATURE_NAME NEEDS_SETUP "what the user must set up"
+  user finishes the setup         →  resume; set IN_PROGRESS again
+You finish the build              →  fill kanban sections, then:
+                                     kanban-update $FEATURE_NAME NEEDS_TESTING "summary"
+                                     ← assigns a port, auto-generates the test card, pings coordinator
+You DO NOT call kanban-done       →  coordinator calls it after user approves → COMPLETE
 ```
+
+Dependencies on other tickets do NOT block you: build against the contract in
+knowledge/contracts/ and mock it. There is no "waiting on another issue" state.
 
 ## Status values
 
-Any string is valid. The following have special meaning:
+The canonical vocabulary, in pipeline order:
 
 | Status | Who sets it | What it means |
 |---|---|---|
+| `NOT_STARTED` | spawn-builder | Ticket created, agent has not begun |
 | `IN_PROGRESS` | Builder | Actively building |
-| `NEEDS_ACTION` | Builder | Blocked on human or external action — state exactly what and who |
-| `BLOCKED_ON` | Builder | Waiting on another issue's output — state issue id and what you need |
-| `BUILT` | Builder | Done, tests pass, ready for user testing. **Triggers test card.** |
+| `NEEDS_SETUP` | Builder | Paused: user must set up external infra the agent cannot — state exactly what and who |
+| `NEEDS_TESTING` | Builder | Build done, ready for the testing phase. **Assigns a port + triggers test card.** |
 | `COMPLETE` | Coordinator (via kanban-done) | User approved, ticket closed |
 
 ## Commands
@@ -39,17 +41,16 @@ Any string is valid. The following have special meaning:
 ```bash
 # Update progress at every meaningful stage — as often as needed
 kanban-update $FEATURE_NAME IN_PROGRESS "implementing the checkout form"
-kanban-update $FEATURE_NAME NEEDS_ACTION "need Stripe secret key from user"
-kanban-update $FEATURE_NAME BLOCKED_ON "ISS-003: need /api/user response shape"
+kanban-update $FEATURE_NAME NEEDS_SETUP "user must create a Stripe account and add STRIPE_SECRET_KEY"
 
-# When done building and tests pass — fills kanban sections first, then:
-kanban-update $FEATURE_NAME BUILT "checkout form complete, 4 Playwright tests pass"
+# When the build is done — fills kanban sections first, then:
+kanban-update $FEATURE_NAME NEEDS_TESTING "checkout form complete, 4 Playwright tests pass"
 
 # Check the full board
 kanban-check
 ```
 
-## What to fill in before calling BUILT
+## What to fill in before calling NEEDS_TESTING
 
 Open `$KANBAN_PROJECT_ROOT/kanban/$FEATURE_NAME.md` and fill in:
 
@@ -63,7 +64,7 @@ Key implementation decisions. Data flow. Any non-obvious choices.
 ## Tests run
 - [x] Description of each passing test (user-facing language, not technical)
 
-Run browser tests with agent-browser before calling BUILT:
+Run browser tests with agent-browser before calling NEEDS_TESTING:
 ```bash
 npm install -g agent-browser && agent-browser install   # once per machine
 agent-browser snapshot          # get element refs

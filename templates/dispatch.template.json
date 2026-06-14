@@ -1,5 +1,4 @@
 {
-  "basePort": 3001,
   "defaultRepo": "",
   "tickets": [
     {
@@ -7,7 +6,6 @@
       "feature": "the-user-facing-feature-name",
       "handoff": "knowledge/handoffs/ISS-001-example.md",
       "dependsOn": [],
-      "port": null,
       "repo": null
     },
     {
@@ -15,7 +13,6 @@
       "feature": "another-feature",
       "handoff": "knowledge/handoffs/ISS-002-example.md",
       "dependsOn": ["ISS-001-example"],
-      "port": null,
       "repo": null
     }
   ]

@@ -28,7 +28,7 @@ const kanbanFiles = fs.existsSync(kanbanDir)
 
 // ── COORDINATOR SCORE ──────────────────────────────────────────────────────
 
-const blockEvents = telemetry.filter(e => e.to === 'BLOCKED_ON');
+const blockEvents = telemetry.filter(e => e.to === 'NEEDS_SETUP');
 const resolveEvents = coordLog.filter(e => e.event === 'resolved');
 
 const resolutionTimes = [];
@@ -88,10 +88,10 @@ for (const file of kanbanFiles) {
   check('Updated kanban at intermediate stages', 15, hasInProgress && !jumpedToComplete,
     jumpedToComplete ? 'jumped from STARTED to COMPLETE without IN_PROGRESS updates' : null);
 
-  // Block discipline: BLOCKED_ON entries have meaningful notes
-  const blockNotes = evs.filter(e => e.to === 'BLOCKED_ON').map(e => e.notes || '');
+  // Block discipline: NEEDS_SETUP entries have meaningful notes
+  const blockNotes = evs.filter(e => e.to === 'NEEDS_SETUP').map(e => e.notes || '');
   const vaguBlocks = blockNotes.filter(n => n.length < 20);
-  check('BLOCKED_ON entries have specific notes', 10,
+  check('NEEDS_SETUP entries have specific notes', 10,
     blockNotes.length === 0 || vaguBlocks.length === 0,
     vaguBlocks.length > 0 ? `${vaguBlocks.length} block(s) with vague notes` : blockNotes.length === 0 ? 'no blocks (good)' : null);
 
@@ -126,7 +126,7 @@ for (const file of kanbanFiles) {
 const allEvs = telemetry;
 const totalFeatures = Object.keys(builderScores).length;
 const completedFeatures = Object.values(builderScores).filter(s => s.details.find(d => d.label.includes('COMPLETE') && d.pass)).length;
-const blockedFeatures = [...new Set(allEvs.filter(e => e.to === 'BLOCKED_ON').map(e => e.feature))].length;
+const blockedFeatures = [...new Set(allEvs.filter(e => e.to === 'NEEDS_SETUP').map(e => e.feature))].length;
 const blockedPct = totalFeatures > 0 ? Math.round((blockedFeatures / totalFeatures) * 100) : 0;
 
 const allStarts    = allEvs.filter(e => e.from === 'NONE').map(e => e.ts);
@@ -190,7 +190,7 @@ if (avgAdherence != null) console.log(`Avg adherence      : ${avgAdherence}%  ${
 
 console.log('\n── RECOMMENDATIONS ──────────────────────────────────────────');
 const recs = [];
-if (coordScore < 80) recs.push('Coordinator: resolve BLOCKED_ON pings faster — builders are idle waiting.');
+if (coordScore < 80) recs.push('Coordinator: resolve NEEDS_SETUP pings faster — builders are idle waiting.');
 if (unresolved.length) recs.push(`Coordinator: ${unresolved.length} block(s) never resolved — check kanban for ${unresolved.join(', ')}.`);
 if (avgAdherence != null && avgAdherence < 70) recs.push('Builders: low adherence overall — handoff docs may be missing info or contracts are too vague.');
 const noTests = Object.values(builderScores).filter(s => !s.details.find(d => d.label.includes('Tests') && d.pass));

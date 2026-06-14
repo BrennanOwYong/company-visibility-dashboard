@@ -18,14 +18,14 @@ When `factory.json` exists in the project root, this session is the coordinator.
 4. For every dependency edge between tickets, write `knowledge/contracts/<issueA>-<issueB>.md` — the exact shape issueA produces (endpoint path, request/response schema, event signature, data model) that issueB consumes. issueB builds against this contract and mocks it; the real implementation from issueA is not required for issueB to start.
 5. Parallelise research using Agent() tool (not tmux) — Sonnet model for research agents
 6. Write AGENTS.md (human-readable module registry with [[backlinks]]) and modules.json (machine-readable)
-7. Fill HANDOFF-template.md for each issue ticket — include intent, success criteria, port, relevant modules, contracts
-8. Assign ports from 3001 upward — one per parallel builder
-9. Create all git worktrees upfront via spawn-builder.sh
+7. Fill HANDOFF-template.md for each issue ticket — include intent, success criteria, relevant modules, contracts
+8. Write the dispatch manifest (kanban/dispatch.json — schema in templates/) listing the tickets. Ports are not assigned here; each builder gets a port at its NEEDS_TESTING transition.
+9. Dispatch builders via `kanban-dispatch` (calls spawn-builder.sh once per ticket, creating each git worktree)
 
 **Coordination loop (reactive — no polling):**
 - Git post-merge hook fires tmux send-keys into this session when a builder merges
-- On BLOCKED_ON: surface to user, resolve, write resolution to the kanban file, ping builder
-- On BUILT: read user-test card at `kanban/user-test-cards/` and present it to the user
+- On NEEDS_SETUP: surface to user the exact external setup required, resolve, write resolution to the kanban file, ping builder
+- On NEEDS_TESTING: read user-test card at `kanban/user-test-cards/` and present it to the user
 - On user approval: call `kanban-done <issue> "<feedback>"` to close the ticket
 - When all features approved: spawn sanity agent (Sonnet) in new tmux session
 
@@ -38,20 +38,25 @@ Builders run as `claude --dangerously-skip-permissions` in their own tmux sessio
 **On start — read in this order:**
 1. AGENTS.md — project knowledge base and module registry
 2. modules.json — available reusable modules and their instantiation type
-3. HANDOFF.md — the specific task, success criteria, port, intent
+3. HANDOFF.md — the specific task, success criteria, intent
 4. `knowledge/lessons.md` — learnings from prior builders on this project
 
 **Before writing any code:** check modules.json for existing modules. Use them. Do not reimplement.
 
 **During build:** update kanban status at every meaningful stage using `kanban-update <issue> <STATUS> <notes>`.
 
-Status values:
-- `IN_PROGRESS` — actively building
-- `NEEDS_ACTION` — blocked on something outside the computer (user must create an account, grant access, provide a credential). State exactly what action is needed and who must do it.
-- `BLOCKED_ON` — blocked on another issue's output. State the issue id and what you need from it.
-- `BUILT` — done, tests pass, ready for user testing. Triggers test card generation automatically.
+Status values (canonical, in pipeline order):
+- `NOT_STARTED` — ticket created by spawn-builder, agent has not begun.
+- `IN_PROGRESS` — actively building.
+- `NEEDS_SETUP` — paused: the user must set up external infra the agent cannot (create an account, grant access, provide a credential). State exactly what is needed and who must do it.
+- `NEEDS_TESTING` — build done, ready for the testing phase. Assigns a port and triggers test card generation automatically.
+- `COMPLETE` — coordinator closes after user approval (via kanban-done).
 
-**Tests:** run browser tests using agent-browser against the live app before calling BUILT. Test your own issue only.
+Dependencies on other issues do not block a builder: build against the contract and mock it. There is no cross-issue blocked state.
+
+A port is assigned only at the NEEDS_TESTING transition — it is a testing-phase resource, not needed during the build.
+
+**Tests:** run browser tests using agent-browser against the live app before calling NEEDS_TESTING. Test your own issue only.
 
 Install if missing: `npm install -g agent-browser && agent-browser install`
 
@@ -61,7 +66,7 @@ agent-browser workflow:
 3. `agent-browser screenshot` — capture state
 4. Re-snapshot after each interaction to verify the result
 
-**On completion — before calling BUILT:**
+**On completion — before calling NEEDS_TESTING:**
 - Fill `## What was built` — what the feature does from the user's perspective
 - Fill `## How it works` — key implementation decisions, data flow, non-obvious choices
 - Fill `## Tests run` — each passing test in `- [x]` format
@@ -70,7 +75,7 @@ agent-browser workflow:
 - If you ran the same shell command more than twice, extract it to `scripts/<name>.sh` and add it to AGENTS.md under "Available scripts"
 - Add any new reusable module to AGENTS.md and modules.json
 
-Then call: `kanban-update <issue> BUILT "<summary>"`
+Then call: `kanban-update <issue> NEEDS_TESTING "<summary>"`
 
 Do NOT call `kanban-done` — the coordinator calls that after user approval.
 
@@ -92,7 +97,7 @@ Required:
 
 ## Automated testing
 
-All tests that produce an objective pass/fail result are run by the builder agent using Playwright MCP or vercel/browser-agent against the live app. Never delegated to a separate agent. Never run by the user. A feature is not BUILT until tests pass.
+All tests that produce an objective pass/fail result are run by the builder agent using Playwright MCP or vercel/browser-agent against the live app. Never delegated to a separate agent. Never run by the user. A build is not ready for NEEDS_TESTING until tests pass.
 
 ## User-testing breakpoints
 
