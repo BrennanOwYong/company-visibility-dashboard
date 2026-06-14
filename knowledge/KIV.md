@@ -89,3 +89,29 @@ from declared status alone.
 **Why:** user is researching the agent↔feature mapping; performance inconclusive.
 **How to apply:** keep liveness/crash detection out of dispatch and status views
 until the mapping is decided. Revisit `DEAD`/restart logic then.
+
+---
+
+## 8. Dispatch kickoff as a function + pluggable project-tracking backend
+
+Two related deferrals:
+
+1. **Kickoff trigger is its own function, called by an external agent.** Starting the
+   dispatch phase should be a single named entry point (e.g. `kanban-dispatch-kickoff`)
+   that the architect/PM agent invokes once its roadmap (the kanban issues) is ready.
+   It must not be wired implicitly into another phase — an external agent calls it.
+
+2. **The kanban layer wraps an abstraction so users can bring their own tracker.** The
+   current `bin/` markdown implementation (issues as `kanban/*.md`, `kanban-create`,
+   `kanban-update`, `kanban-graph`, `kanban-check`) is ONE backend. People will want to
+   use Jira / Linear / GitHub Issues / Asana. The primitives should sit behind a stable
+   interface (create issue, update status, read graph, list) that adapters implement.
+
+The canonical issue data model (issue, feature, title, status, milestone, dependsOn,
+needsInfra, links, port, test_command) is the contract that any backend must map to.
+
+**Why:** user wants the tracker swappable and the dispatch start explicitly externally
+triggered, not baked into a phase.
+**How to apply:** build the kanban primitives against the data model first (done for the
+local markdown backend). When wiring dispatch, expose the kickoff as a standalone
+function and keep all tracker access behind the interface so an adapter can replace it.

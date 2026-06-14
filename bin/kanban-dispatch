@@ -1,129 +1,83 @@
 #!/bin/bash
-# kanban-dispatch — the Kanban Dispatch phase. A script, not an agent.
+# kanban-dispatch — spawns one builder per NOT_STARTED kanban issue.
 #
-# Reads the architect's dispatch manifest and spawns one interactive Claude Code
-# builder per ticket: git worktree + tmux session + context provision, all via
-# spawn-builder.sh (called once per agent). Dispatch is idempotent — a ticket that
-# already has a kanban entry is skipped, so the script is safe to re-run as the
-# architect appends new tickets.
+# Issues are created by the architect via kanban-create (the source of truth); each
+# issue file is the builder's brief. spawn-builder is called once per issue and uses
+# that issue (it does not overwrite it). Idempotent: an issue whose worktree field is
+# already set has been dispatched and is skipped, so this is safe to re-run as the
+# architect adds issues.
 #
-# Ports are NOT assigned here. A port is a testing-phase resource, assigned at the
-# NEEDS_TESTING transition (see kanban-update). The board view is `kanban-check`;
-# tmux liveness is deliberately NOT mapped to kanban state (see KIV item 7).
+# A port is NOT assigned here (testing-phase resource — set at NEEDS_TESTING). The board
+# view is kanban-check; tmux liveness is deliberately not mapped to state (KIV 7).
+# Note: the standalone kickoff trigger and pluggable tracker backend are KIV 8 — this
+# script is the local-markdown dispatcher.
 #
 # Usage:
-#   kanban-dispatch [manifest]            dispatch every not-yet-dispatched ticket
-#   kanban-dispatch --dry-run  [manifest] show what would be dispatched, spawn nothing
-#   kanban-dispatch --force    [manifest] re-dispatch even tickets with a kanban entry
-#
-# Default manifest: $KANBAN_PROJECT_ROOT/kanban/dispatch.json
+#   kanban-dispatch            dispatch every NOT_STARTED, not-yet-spawned issue
+#   kanban-dispatch --dry-run  show what would be dispatched, spawn nothing
+#   kanban-dispatch --force    re-spawn even issues that already have a worktree
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(cat "$HOME/.claude/.coordinator-root" 2>/dev/null || pwd)}"
+KANBAN_DIR="$PROJECT_ROOT/kanban"
 
-MODE="dispatch"
-MANIFEST=""
-FORCE="0"
-
+MODE="dispatch"; FORCE="0"
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) MODE="dryrun"; shift;;
     --force)   FORCE="1"; shift;;
-    *)         MANIFEST="$1"; shift;;
+    *) shift;;
   esac
 done
 
-MANIFEST="${MANIFEST:-$PROJECT_ROOT/kanban/dispatch.json}"
+[ -d "$KANBAN_DIR" ] || { echo "No kanban dir: $KANBAN_DIR"; exit 1; }
 
-# normalize_manifest — emit one record per ticket. Fields are separated by US
-# (\x1f), a non-whitespace control char, so empty fields (e.g. no dependsOn) are
-# preserved and never collapsed by read/IFS.
-#   issue \x1f feature \x1f handoff \x1f dependsOn(csv) \x1f repo
-normalize_manifest() {
-  python3 - "$MANIFEST" << 'PY'
-import json, sys
-with open(sys.argv[1]) as f:
-    m = json.load(f)
-default_repo = m.get("defaultRepo") or ""
-SEP = "\x1f"
-for t in m.get("tickets", []):
-    issue = (t.get("issue") or "").strip()
-    if not issue:
-        continue
-    feature = (t.get("feature") or issue).strip()
-    handoff = (t.get("handoff") or "").strip()
-    deps = t.get("dependsOn") or []
-    if isinstance(deps, str):
-        deps = [d.strip() for d in deps.split(",") if d.strip()]
-    deps_csv = ",".join(deps)
-    repo = (t.get("repo") or default_repo or "").strip()
-    print(SEP.join([issue, feature, handoff, deps_csv, repo]))
-PY
-}
+fm() { grep "^$2:" "$1" | head -1 | sed "s/^$2:[[:space:]]*//"; }
 
-if [ ! -f "$MANIFEST" ]; then
-  echo "No dispatch manifest at: $MANIFEST"
-  echo "The architect writes it. Schema: templates/dispatch.template.json"
-  exit 1
-fi
-
-echo "Dispatch manifest: $MANIFEST"
 [ "$MODE" = "dryrun" ] && echo "(dry run — nothing will be spawned)"
-echo ""
 
-DISPATCHED=0
-SKIPPED=0
-DISPATCH_LOG="$PROJECT_ROOT/kanban/dispatch-log.jsonl"
-mkdir -p "$PROJECT_ROOT/kanban"
+DISPATCHED=0; SKIPPED=0
+DISPATCH_LOG="$KANBAN_DIR/dispatch-log.jsonl"
 
-while IFS=$'\x1f' read -r ISSUE FEATURE HANDOFF DEPS REPO; do
-  [ -z "$ISSUE" ] && continue
+for KFILE in "$KANBAN_DIR"/*.md; do
+  [ -f "$KFILE" ] || continue
+  base=$(basename "$KFILE" .md)
+  case "$base" in *-card|*-aar) continue;; esac
 
-  # Resolve a relative handoff path against the project root
-  case "$HANDOFF" in
-    /*) HPATH="$HANDOFF";;
-    *)  HPATH="$PROJECT_ROOT/$HANDOFF";;
-  esac
+  STATUS=$(fm "$KFILE" status)
+  [ "$STATUS" = "NOT_STARTED" ] || continue   # only dispatch fresh issues
 
-  if [ -z "$HANDOFF" ] || [ ! -f "$HPATH" ]; then
-    echo "  ✗ $ISSUE — handoff not found: ${HANDOFF:-(empty)} — skipped"
-    SKIPPED=$((SKIPPED+1))
-    continue
+  ISSUE=$(fm "$KFILE" issue); [ -z "$ISSUE" ] && ISSUE="$base"
+  WT=$(fm "$KFILE" worktree)
+  if [ -n "$WT" ] && [ "$FORCE" != "1" ]; then
+    echo "  • $ISSUE — already dispatched (worktree set) — skipped"; SKIPPED=$((SKIPPED+1)); continue
   fi
 
-  # Idempotency: a kanban entry means this ticket was already dispatched
-  if [ -f "$PROJECT_ROOT/kanban/$ISSUE.md" ] && [ "$FORCE" != "1" ]; then
-    echo "  • $ISSUE — already dispatched (kanban entry exists) — skipped"
-    SKIPPED=$((SKIPPED+1))
-    continue
-  fi
+  FEATURE=$(fm "$KFILE" feature)
+  DEPS=$(fm "$KFILE" dependsOn)
+  REPO=$(fm "$KFILE" repo)
 
-  ARGS=("$ISSUE" "$HPATH" --feature "$FEATURE")
+  ARGS=("$ISSUE" "$KFILE" --feature "${FEATURE:-$ISSUE}")
   [ -n "$DEPS" ] && ARGS+=(--depends-on "$DEPS")
   [ -n "$REPO" ] && ARGS+=(--repo "$REPO")
 
   if [ "$MODE" = "dryrun" ]; then
-    echo "  → would spawn: $ISSUE  feature:$FEATURE  deps:[${DEPS:-none}]  repo:${REPO:-(project root)}"
-    DISPATCHED=$((DISPATCHED+1))
-    continue
+    echo "  → would spawn: $ISSUE  feature:${FEATURE:-$ISSUE}  deps:[${DEPS:-none}]  repo:${REPO:-(project root)}"
+    DISPATCHED=$((DISPATCHED+1)); continue
   fi
 
   echo "  → dispatching $ISSUE ..."
   if ( cd "$PROJECT_ROOT" && KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/spawn-builder.sh" "${ARGS[@]}" ); then
     DISPATCHED=$((DISPATCHED+1))
     TS=$(date +%s%3N 2>/dev/null || echo 0)
-    printf '{"ts":%s,"issue":"%s","feature":"%s","dependsOn":"%s"}\n' \
-      "$TS" "$ISSUE" "$FEATURE" "$DEPS" >> "$DISPATCH_LOG"
+    printf '{"ts":%s,"issue":"%s","feature":"%s","dependsOn":"%s"}\n' "$TS" "$ISSUE" "$FEATURE" "$DEPS" >> "$DISPATCH_LOG"
   else
-    echo "  ✗ $ISSUE — spawn-builder failed"
-    SKIPPED=$((SKIPPED+1))
+    echo "  ✗ $ISSUE — spawn-builder failed"; SKIPPED=$((SKIPPED+1))
   fi
-done < <(normalize_manifest)
+done
 
 echo ""
 echo "Dispatched: $DISPATCHED   Skipped: $SKIPPED"
-if [ "$MODE" != "dryrun" ] && [ "$DISPATCHED" -gt 0 ]; then
-  echo ""
-  echo "Run 'kanban-check' for the board."
-fi
+[ "$MODE" != "dryrun" ] && [ "$DISPATCHED" -gt 0 ] && echo "Run 'kanban-check' for the board."
+exit 0

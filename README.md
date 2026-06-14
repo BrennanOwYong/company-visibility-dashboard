@@ -67,7 +67,9 @@ Scripts live in `bin/`. They are added to your PATH automatically on first sessi
 | `kanban-done <issue> <feedback>` | Coordinator | Writes after-action report, marks COMPLETE |
 | `kanban-generate-card <issue>` | Auto on NEEDS_TESTING | Writes user test card |
 | `kanban-resolved <issue>` | Coordinator | Resumes a NEEDS_SETUP ticket after the user does the setup |
-| `kanban-dispatch [manifest]` | Coordinator | Spawns one builder per ticket from kanban/dispatch.json |
+| `kanban-create <issue> --feature <name> [opts]` | Architect | Creates one issue with all roadmap data (deps, infra, links, intent, testing); scaffolds contract stubs |
+| `kanban-graph` | Architect/Anyone | Build waves + cycle/dangling-dep/infra check over the issue graph |
+| `kanban-dispatch` | Coordinator | Spawns one builder per NOT_STARTED issue (idempotent) |
 | `kanban-perf` | Anyone | Timing report from telemetry |
 | `spawn-builder.sh` | kanban-dispatch | Creates worktree + kanban entry + tmux session (once per agent) |
 | `factory-init.sh` | SessionStart hook | Registers coordinator, installs post-merge hooks |
@@ -75,7 +77,8 @@ Scripts live in `bin/`. They are added to your PATH automatically on first sessi
 ## Ticket lifecycle
 
 ```
-spawn-builder  →  NOT_STARTED
+kanban-create  →  NOT_STARTED  (architect, with all roadmap data)
+kanban-dispatch → spawn-builder  (one builder per issue)
 builder begins →  kanban-update IN_PROGRESS
 needs infra    →  kanban-update NEEDS_SETUP  (user sets up external infra, then resume)
 build done     →  kanban-update NEEDS_TESTING  (port assigned, test card generated, coordinator pinged)
@@ -124,7 +127,9 @@ All scripts live in `~/.claude/bin/` after install. Builders invoke them via the
 | `kanban-done <issue> <feedback>` | Coordinator | Writes after-action report, extracts lessons, marks COMPLETE |
 | `kanban-generate-card <issue>` | Auto (on NEEDS_TESTING) | Writes user test card to `kanban/user-test-cards/` |
 | `kanban-resolved <issue>` | Coordinator | Resumes a NEEDS_SETUP ticket after the user does the setup, pings the builder |
-| `kanban-dispatch [manifest]` | Coordinator | Spawns one builder per ticket from `kanban/dispatch.json` |
+| `kanban-create <issue> --feature <name> [opts]` | Architect | Creates one issue with all roadmap data; scaffolds contract stubs per dependency |
+| `kanban-graph` | Architect/Anyone | Build waves + cycle/dangling/infra validation over the issue graph |
+| `kanban-dispatch` | Coordinator | Spawns one builder per NOT_STARTED issue (idempotent) |
 | `kanban-perf` | Anyone | Timing report from telemetry |
 | `kanban-eval` | Anyone | Quality report |
 | `spawn-builder.sh` | kanban-dispatch | Creates worktree + kanban entry + tmux session (once per agent) |
@@ -133,7 +138,8 @@ All scripts live in `~/.claude/bin/` after install. Builders invoke them via the
 ## Ticket lifecycle
 
 ```
-spawn-builder → NOT_STARTED
+kanban-create → NOT_STARTED  (architect, with all roadmap data)
+kanban-dispatch → spawn-builder  (one builder per issue)
 builder begins → kanban-update IN_PROGRESS
 needs infra   → kanban-update NEEDS_SETUP  (user sets up external infra, then resume)
 build done    → kanban-update NEEDS_TESTING  (port assigned, test card generated, coordinator pinged)

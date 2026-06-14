@@ -143,18 +143,11 @@ allocated only at the `NEEDS_TESTING` transition, by `kanban-update`: first free
 from 3001 up, skipping ports already held by other tickets, written to the kanban file.
 spawn-builder no longer sets a port or FEATURE_PORT. The manifest carries no ports.
 
-### Architect → Dispatch contract
-The architect's machine-readable deliverable is a **dispatch manifest** at
-`kanban/dispatch.json`. Schema: `templates/dispatch.template.json`.
-```
-{ "defaultRepo": "<abs path or "">",
-  "tickets": [ { "issue", "feature", "handoff", "dependsOn":[], "repo":null } ] }
-```
-- `handoff` is project-root-relative or absolute; must exist or the ticket is skipped.
-- `dependsOn` is recorded on the kanban ticket (used later by kanban-done's cluster
-  check). It does NOT gate spawning — all builders launch in parallel, each mocking deps.
-- spawn-builder is called once per ticket (per-agent, tracked). That single-spawn shape
-  is intended; the dispatcher just iterates it.
+### Architect → Dispatch contract  [SUPERSEDED 2026-06-14 — see the kanban-primitives section below]
+The dispatch.json manifest described here was RETIRED. The architect now creates kanban
+issues directly via `kanban-create`; `kanban-dispatch` reads NOT_STARTED issues. Kept for
+history only — `dependsOn` does NOT gate spawning (builders mock deps), and spawn-builder
+is still called once per issue (per-agent, tracked).
 
 ### Commands
 - `kanban-dispatch [manifest]` — dispatch every not-yet-dispatched ticket. Idempotent
@@ -183,12 +176,47 @@ only source of truth; do not couple tmux liveness to state. See KIV.md item 7.
 - Not exercised: real `spawn-builder` shell-out (launches actual claude); arg
   construction verified via --dry-run, queue path tested in prior session.
 
+## Kanban primitives + issue-sourced dispatch (BUILT AND TESTED — 2026-06-14)
+
+The architect now creates the kanban issues directly from the roadmap; the issue is the
+single source of truth and the builder's brief. The dispatch.json manifest is RETIRED.
+
+New primitives (the local-markdown backend of a future pluggable tracker — KIV 8):
+- `kanban-create <issue> --feature <name> [--title --milestone --intent --build --success
+  --testing --depends-on a,b --needs-infra "X, Y" --links "[[m]],[[i]]" --repo]` — writes
+  one issue with all roadmap data. status NOT_STARTED, no port. Refuses to overwrite.
+  Scaffolds an empty contract stub per dependency edge at
+  `knowledge/contracts/<issue>-<dep>.md` for the architect to fill.
+- `kanban-graph [--json]` — reads all issues, prints build WAVES (topological levels =
+  what to build and when), the external-infra rollup, and flags dependency cycles and
+  dangling deps. Lets the architect verify the roadmap before dispatch.
+
+Canonical issue data model (frontmatter): issue, feature, title, status, milestone, port
+(empty until NEEDS_TESTING), repo, branch, worktree (filled at spawn), dependsOn,
+needsInfra, links, user_facing, test_command. Body: Intent / Build / Success criteria /
+Testing / Dependencies, then the builder-filled sections.
+
+Wiring changes:
+- `kanban-dispatch` now reads `kanban/*.md` where status==NOT_STARTED (no manifest). The
+  issue file IS the handoff passed to spawn-builder. Idempotent via the `worktree` field
+  (set at spawn). `--dry-run` / `--force` retained.
+- `spawn-builder` no longer authors the issue body — if the issue exists (architect made
+  it) it uses it and only fills branch/worktree (and repo if blank). Creates a minimal
+  issue via `kanban-create` only when none exists.
+- CLAUDE.md spec phase rewritten: decompose → `kanban-create` per issue → fill contracts
+  → `kanban-graph` to verify → `kanban-dispatch`. README + SKILL updated.
+
+Tests (2026-06-14): kanban-create full data + contract scaffold + refuse-overwrite PASS;
+kanban-graph waves/infra/cycle/dangling PASS; dispatch reads NOT_STARTED issues, skips
+worktree-set and IN_PROGRESS issues PASS. Real spawn (launches claude) not exercised;
+arg path verified via --dry-run.
+
 ## Still TODO (next agent / next session)
-- Wire the actual phase agents: spawn a persistent `architect` tmux session and have the PM
-  delegate to it via `tmux-delegate`; on the architect's deliverable, trigger kanban dispatch.
-- Architect->kanban trigger: when the architect writes `kanban/dispatch.json` and finishes
-  (Stop), run `kanban-dispatch`. The dispatch script + manifest contract are DONE; only the
-  auto-fire on the architect's deliverable remains.
-- Define the TESTING phase itself: who serves the app on the assigned port and who runs the
-  test (tester agent vs user). Port allocation at NEEDS_TESTING is in place; the consumer is not.
-- Resolve KIV item 7 (agent↔feature mapping) before adding any liveness/crash detection.
+- KIV 8: expose the dispatch KICKOFF as a standalone function an external agent calls
+  (not baked into a phase), and put all tracker access behind an interface so Jira/Linear/
+  GitHub-Issues adapters can replace the markdown backend. Data model above is the contract.
+- Wire the phase agents: persistent `architect` tmux session; PM delegates via
+  `tmux-delegate`; architect calls the kickoff function once `kanban-graph` is clean.
+- Define the TESTING phase: who serves the app on the assigned port and who runs the test
+  (tester agent vs user). Port allocation at NEEDS_TESTING is in place; the consumer is not.
+- Resolve KIV 7 (agent↔feature mapping) before adding any liveness/crash detection.

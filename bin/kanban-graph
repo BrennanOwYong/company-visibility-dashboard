@@ -1,0 +1,111 @@
+#!/usr/bin/env node
+// kanban-graph [--json]
+//
+// A kanban PRIMITIVE. Reads kanban/*.md and reports the dependency graph the architect
+// built from the roadmap: build waves (what to build and when), dependency cycles,
+// dangling dependencies, and unresolved external-infra needs. Lets the architect verify
+// the roadmap it just created before anything is dispatched.
+
+const fs = require('fs');
+const path = require('path');
+
+const JSON_MODE = process.argv.includes('--json');
+const root = process.env.KANBAN_PROJECT_ROOT || process.cwd();
+const dir = path.join(root, 'kanban');
+
+if (!fs.existsSync(dir)) { console.error('No kanban dir:', dir); process.exit(0); }
+
+function frontmatter(text) {
+  const m = text.match(/^---\n([\s\S]*?)\n---/);
+  const fm = {};
+  if (!m) return fm;
+  for (const line of m[1].split('\n')) {
+    const i = line.indexOf(':');
+    if (i === -1) continue;
+    fm[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return fm;
+}
+const list = v => (v || '').split(',').map(s => s.replace(/[\[\]"]/g, '').trim()).filter(Boolean);
+
+const issues = {};
+for (const f of fs.readdirSync(dir)) {
+  if (!f.endsWith('.md') || f.endsWith('-card.md') || f.endsWith('-aar.md')) continue;
+  const fm = frontmatter(fs.readFileSync(path.join(dir, f), 'utf8'));
+  const id = fm.issue || f.replace(/\.md$/, '');
+  issues[id] = {
+    id, feature: fm.feature || '', title: fm.title || '', status: fm.status || 'NOT_STARTED',
+    milestone: fm.milestone || '', dependsOn: list(fm.dependsOn), needsInfra: list(fm.needsInfra),
+  };
+}
+const ids = Object.keys(issues);
+
+// Dangling deps — dependsOn pointing at an issue that does not exist
+const dangling = [];
+for (const id of ids) for (const d of issues[id].dependsOn) if (!issues[d]) dangling.push({ issue: id, missing: d });
+
+// Topological levels (Kahn). Level = longest dependency chain to this issue → build wave.
+const indeg = {}; ids.forEach(i => indeg[i] = 0);
+for (const id of ids) for (const d of issues[id].dependsOn) if (issues[d]) indeg[id]++;
+const level = {};
+const queue = ids.filter(i => indeg[i] === 0);
+queue.forEach(i => level[i] = 0);
+const indeg2 = { ...indeg };
+let processed = 0;
+const q = [...queue];
+while (q.length) {
+  const cur = q.shift(); processed++;
+  for (const id of ids) {
+    if (issues[id].dependsOn.includes(cur) && issues[cur]) {
+      indeg2[id]--;
+      level[id] = Math.max(level[id] || 0, (level[cur] || 0) + 1);
+      if (indeg2[id] === 0) q.push(id);
+    }
+  }
+}
+const hasCycle = processed < ids.length;
+const cyclic = ids.filter(i => !(i in level));
+
+const waves = {};
+for (const id of ids) if (id in level) (waves[level[id]] = waves[level[id]] || []).push(id);
+
+const infra = {};
+for (const id of ids) for (const inf of issues[id].needsInfra) (infra[inf] = infra[inf] || []).push(id);
+
+const result = { issues, waves, dangling, hasCycle, cyclic, infra };
+if (JSON_MODE) { console.log(JSON.stringify(result, null, 2)); process.exit(0); }
+
+console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+console.log(`KANBAN GRAPH — ${path.basename(root)}  (${ids.length} issues)`);
+console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+console.log('\n── BUILD WAVES (what to build and when) ──────────────────────');
+console.log('Issues in the same wave have no dependency between them — build in parallel.');
+const waveNums = Object.keys(waves).map(Number).sort((a, b) => a - b);
+for (const w of waveNums) {
+  console.log(`\n  Wave ${w}`);
+  for (const id of waves[w]) {
+    const it = issues[id];
+    const deps = it.dependsOn.length ? `  depends:[${it.dependsOn.join(', ')}]` : '';
+    const inf = it.needsInfra.length ? `  infra:[${it.needsInfra.join(', ')}]` : '';
+    console.log(`    [${id}] ${it.title || it.feature}${deps}${inf}`);
+  }
+}
+
+if (Object.keys(infra).length) {
+  console.log('\n── EXTERNAL INFRA NEEDED (user must set up → NEEDS_SETUP) ─────');
+  for (const [inf, who] of Object.entries(infra)) console.log(`  ${inf}  ← ${who.join(', ')}`);
+}
+
+if (dangling.length) {
+  console.log('\n── ⚠ DANGLING DEPENDENCIES ───────────────────────────────────');
+  for (const d of dangling) console.log(`  [${d.issue}] depends on [${d.missing}] which does not exist`);
+}
+
+if (hasCycle) {
+  console.log('\n── ⚠ DEPENDENCY CYCLE ────────────────────────────────────────');
+  console.log(`  Issues in a cycle (cannot be ordered): ${cyclic.join(', ')}`);
+}
+
+if (!dangling.length && !hasCycle) console.log('\n  ✓ graph is acyclic with no dangling dependencies');
+console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');

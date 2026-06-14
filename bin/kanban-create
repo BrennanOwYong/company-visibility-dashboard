@@ -1,0 +1,135 @@
+#!/bin/bash
+# kanban-create <issue> --feature <name> [options]
+#
+# A kanban PRIMITIVE. Creates one issue with all the data the architect derives from
+# the roadmap: intent, what to build, success criteria, testing, dependencies on other
+# issues, external-infra needs, and [[backlinks]]. status starts NOT_STARTED; a port is
+# NOT assigned here (it is a testing-phase resource, set at NEEDS_TESTING).
+#
+# For each issue dependency it scaffolds an empty contract stub the architect fills, so
+# the dependent issue can build against the interface and mock it.
+#
+# This is the local-markdown implementation of the issue model. A future abstraction
+# layer will let the same primitive target external trackers (Jira/Linear/...) — see KIV.
+set -e
+
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(pwd)}"
+KANBAN_DIR="$PROJECT_ROOT/kanban"
+
+ISSUE=""; FEATURE=""; TITLE=""; MILESTONE=""; REPO=""
+DEPENDS=""; INFRA=""; LINKS=""; USER_FACING="true"
+INTENT=""; BUILD=""; SUCCESS=""; TESTING=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --feature)      FEATURE="$2";     shift 2;;
+    --title)        TITLE="$2";       shift 2;;
+    --milestone)    MILESTONE="$2";   shift 2;;
+    --repo)         REPO="$2";        shift 2;;
+    --depends-on)   DEPENDS="$2";     shift 2;;
+    --needs-infra)  INFRA="$2";       shift 2;;
+    --links)        LINKS="$2";       shift 2;;
+    --user-facing)  USER_FACING="$2"; shift 2;;
+    --intent)       INTENT="$2";      shift 2;;
+    --build)        BUILD="$2";       shift 2;;
+    --success)      SUCCESS="$2";     shift 2;;
+    --testing)      TESTING="$2";     shift 2;;
+    *) [ -z "$ISSUE" ] && ISSUE="$1"; shift;;
+  esac
+done
+
+if [ -z "$ISSUE" ] || [ -z "$FEATURE" ]; then
+  echo "Usage: kanban-create <issue> --feature <name> [--title <text>] [--depends-on a,b]"
+  echo "       [--needs-infra \"Stripe account, OPENAI_API_KEY\"] [--links \"[[mod]],[[iss]]\"]"
+  echo "       [--milestone n] [--intent ...] [--build ...] [--success ...] [--testing ...]"
+  exit 1
+fi
+
+mkdir -p "$KANBAN_DIR/user-test-cards"
+KFILE="$KANBAN_DIR/$ISSUE.md"
+if [ -f "$KFILE" ]; then
+  echo "Issue already exists: $KFILE (refusing to overwrite)"
+  exit 1
+fi
+
+# Scaffold one contract stub per issue dependency (architect fills each in)
+CONTRACT_REFS=""
+if [ -n "$DEPENDS" ]; then
+  mkdir -p "$PROJECT_ROOT/knowledge/contracts"
+  IFS=',' read -ra DEPS_ARR <<< "$DEPENDS"
+  for dep in "${DEPS_ARR[@]}"; do
+    dep="$(echo "$dep" | xargs)"
+    [ -z "$dep" ] && continue
+    CPATH="$PROJECT_ROOT/knowledge/contracts/$ISSUE-$dep.md"
+    if [ ! -f "$CPATH" ]; then
+      cat > "$CPATH" << CEOF
+# Contract: $ISSUE depends on $dep
+
+What $dep produces that $ISSUE consumes. Fill in the exact shape:
+- endpoint path / event signature / data model
+- request + response schema
+
+$ISSUE builds against this and mocks it; the real $dep implementation is not required to start.
+CEOF
+    fi
+    CONTRACT_REFS="$CONTRACT_REFS knowledge/contracts/$ISSUE-$dep.md"
+  done
+fi
+
+cat > "$KFILE" << EOF
+---
+issue: $ISSUE
+feature: $FEATURE
+title: $TITLE
+status: NOT_STARTED
+milestone: $MILESTONE
+port:
+repo: $REPO
+branch:
+worktree:
+dependsOn: $DEPENDS
+needsInfra: $INFRA
+links: $LINKS
+user_facing: $USER_FACING
+test_command:
+---
+
+## Intent
+${INTENT:-(why this issue exists — architect fills)}
+
+## Build
+${BUILD:-(what to build — architect fills)}
+
+## Success criteria
+${SUCCESS:-(acceptance criteria — architect fills)}
+
+## Testing
+${TESTING:-(how this gets tested and what state to load — architect fills)}
+
+## Dependencies
+- Issues: ${DEPENDS:-(none)}${CONTRACT_REFS:+  (contracts:$CONTRACT_REFS )}
+- External infra (user sets up; gates NEEDS_SETUP): ${INFRA:-(none)}
+- Links: ${LINKS:-(none)}
+
+## What was built
+(builder fills this in)
+
+## How it works
+(builder fills this in)
+
+## Tests run
+(builder fills this in — use - [x] format)
+
+## Lessons learned
+(builder fills this in — non-obvious discoveries only)
+
+## Feedback from user
+(none)
+EOF
+
+echo "Created issue: $KFILE"
+[ -n "$DEPENDS" ]       && echo "  dependsOn : $DEPENDS"
+[ -n "$INFRA" ]         && echo "  needsInfra: $INFRA"
+[ -n "$LINKS" ]         && echo "  links     : $LINKS"
+[ -n "$CONTRACT_REFS" ] && echo "  contracts :$CONTRACT_REFS"
+exit 0

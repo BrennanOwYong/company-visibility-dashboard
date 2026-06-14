@@ -4,8 +4,8 @@ Use this skill at the start of every builder session and whenever you need to up
 
 ## Your issue file
 
-Your kanban file is at `$KANBAN_PROJECT_ROOT/kanban/$FEATURE_NAME.md`.
-It contains: issue id, parent feature name, port, repo, status, dependencies, and sections you must fill in.
+Your kanban file is at `$KANBAN_PROJECT_ROOT/kanban/$FEATURE_NAME.md` (also copied into your worktree as HANDOFF.md).
+The architect created it with your brief — read these sections first: **Intent**, **Build**, **Success criteria**, **Testing**, and **Dependencies** (issues you depend on + their contracts in `knowledge/contracts/`, and external infra the user must set up). The frontmatter holds: issue id, feature, status, milestone, dependsOn, needsInfra, links, repo. Then fill in the **What was built / How it works / Tests run / Lessons learned** sections as you go.
 
 ## Lifecycle — builder's view
 

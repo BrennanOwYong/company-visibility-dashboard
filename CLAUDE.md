@@ -14,13 +14,18 @@ When `factory.json` exists in the project root, this session is the coordinator.
 **Spec phase (runs after feature list is confirmed, before any builder spawns):**
 1. For each confirmed feature, ask the user to walk through the user flow step by step. One feature at a time. Map each step to the feature it satisfies. Write to `knowledge/user-flow.md`.
 2. Derive negative edge cases from the flow. If the user has not provided them, build them yourself — do not ask unless a case requires a product decision (e.g. "what happens if payment fails mid-checkout?").
-3. From the user flow, decompose into issue tickets. Each ticket = one atomic deliverable. Set the `feature:` field to the user-requested feature name it satisfies.
-4. For every dependency edge between tickets, write `knowledge/contracts/<issueA>-<issueB>.md` — the exact shape issueA produces (endpoint path, request/response schema, event signature, data model) that issueB consumes. issueB builds against this contract and mocks it; the real implementation from issueA is not required for issueB to start.
-5. Parallelise research using Agent() tool (not tmux) — Sonnet model for research agents
-6. Write AGENTS.md (human-readable module registry with [[backlinks]]) and modules.json (machine-readable)
-7. Fill HANDOFF-template.md for each issue ticket — include intent, success criteria, relevant modules, contracts
-8. Write the dispatch manifest (kanban/dispatch.json — schema in templates/) listing the tickets. Ports are not assigned here; each builder gets a port at its NEEDS_TESTING transition.
-9. Dispatch builders via `kanban-dispatch` (calls spawn-builder.sh once per ticket, creating each git worktree)
+3. Decompose the user flow into atomic issues and create each with `kanban-create`. The issue carries all the roadmap data — there is no separate handoff to author:
+   ```
+   kanban-create <issue> --feature <name> --title "<what to build>" --milestone <N> \
+     --intent "..." --build "..." --success "..." --testing "..." \
+     --depends-on <iss-a,iss-b> --needs-infra "Stripe account, OPENAI_API_KEY" --links "[[module]],[[iss]]"
+   ```
+   `--depends-on` = other issues this waits on. `--needs-infra` = external infra the user must set up (each surfaces as NEEDS_SETUP). `--milestone` + deps express what to build and when. Status starts NOT_STARTED; no port is assigned until NEEDS_TESTING.
+4. kanban-create scaffolds an empty contract stub per dependency edge at `knowledge/contracts/<issue>-<dep>.md`. Fill each with the exact shape the dependency produces (endpoint path, request/response schema, event signature, data model). The dependent issue builds against it and mocks it; the real implementation is not required to start.
+5. Run `kanban-graph` to verify the roadmap: no cycles, no dangling deps, and review the build waves (what is parallel, what waits) and the external-infra rollup.
+6. Parallelise research using Agent() tool (not tmux) — Sonnet model for research agents
+7. Write AGENTS.md (human-readable module registry with [[backlinks]]) and modules.json (machine-readable)
+8. Dispatch builders via `kanban-dispatch` (calls spawn-builder.sh once per issue, creating each git worktree). spawn-builder uses the issue you created — it does not overwrite it. Each builder gets a port at its NEEDS_TESTING transition.
 
 **Coordination loop (reactive — no polling):**
 - Git post-merge hook fires tmux send-keys into this session when a builder merges

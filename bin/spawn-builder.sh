@@ -71,40 +71,20 @@ fi
   cp "$PROJECT_ROOT/knowledge/lessons.md" "$WORKTREE_PATH/knowledge/lessons.md"
 }
 
-# Create kanban issue entry
+# Kanban issue: the architect may already have created it via kanban-create with the
+# full roadmap data (deps, infra, intent, testing). Do not clobber it — create a minimal
+# one only if missing, then fill the spawn-time fields.
 mkdir -p "$PROJECT_ROOT/kanban/user-test-cards"
-cat > "$PROJECT_ROOT/kanban/$ISSUE.md" << EOF
----
-issue: $ISSUE
-feature: $FEATURE_NAME
-port: $PORT
-repo: $REPO_ROOT
-status: NOT_STARTED
-branch: feat/$ISSUE
-worktree: $WORKTREE_PATH
-dependsOn: $DEPENDS_ON
-user_facing: true
-test_command:
----
-
-## What was built
-(builder fills this in)
-
-## How it works
-(builder fills this in)
-
-## Tests run
-(builder fills this in — use - [x] format)
-
-## Lessons learned
-(builder fills this in — non-obvious discoveries only: API shapes, env gotchas, workarounds)
-
-## Blocked on
-(none)
-
-## Feedback from user
-(none)
-EOF
+KFILE="$PROJECT_ROOT/kanban/$ISSUE.md"
+if [ ! -f "$KFILE" ]; then
+  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR_SB/kanban-create" "$ISSUE" \
+    --feature "$FEATURE_NAME" --repo "$REPO_ROOT" ${DEPENDS_ON:+--depends-on "$DEPENDS_ON"} >/dev/null
+fi
+# branch + worktree are always spawn-time; set repo only if the architect left it blank
+sed -i "s|^branch:.*|branch: feat/$ISSUE|" "$KFILE"
+sed -i "s|^worktree:.*|worktree: $WORKTREE_PATH|" "$KFILE"
+CUR_REPO=$(grep "^repo:" "$KFILE" | sed 's/^repo:[[:space:]]*//')
+[ -z "$CUR_REPO" ] && sed -i "s|^repo:.*|repo: $REPO_ROOT|" "$KFILE"
 
 # Create tmux session. No FEATURE_PORT — a port is assigned at the NEEDS_TESTING
 # transition (see kanban-update) and read from the kanban file when testing begins.
