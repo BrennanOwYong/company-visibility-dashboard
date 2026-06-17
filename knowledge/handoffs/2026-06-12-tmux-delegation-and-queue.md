@@ -211,7 +211,32 @@ kanban-graph waves/infra/cycle/dangling PASS; dispatch reads NOT_STARTED issues,
 worktree-set and IN_PROGRESS issues PASS. Real spawn (launches claude) not exercised;
 arg path verified via --dry-run.
 
+## Technical spec — the architect's primary deliverable (added 2026-06-14)
+
+Gap found by user: the architect phase created issues but nothing captured the system
+design they derive FROM. Added `templates/technical-spec.md` → architect writes
+`knowledge/technical-spec.md` before decomposing. It is the single source of design truth.
+
+Covers/captures (each section feeds a downstream artifact):
+1. System overview · 2. Tech stack + decisions (→ AGENTS.md) · 3. Data model ·
+4. Module decomposition (→ modules.json / AGENTS.md, [[backlinks]]) ·
+5. Component/issue map (→ one kanban-create per row: feature/title/build/intent/success/links) ·
+6. Interfaces + contracts (→ --depends-on; kanban-create scaffolds the contract stubs) ·
+7. External infrastructure (→ --needs-infra → NEEDS_SETUP) ·
+8. Build sequencing/milestones (→ --milestone/--depends-on; verified by kanban-graph) ·
+9. Cross-cutting concerns · 10. Testing strategy (→ test_command / NEEDS_TESTING) ·
+11. Non-goals · 12. Open questions/risks (→ KIV).
+
+The PM's deliverable is `knowledge/user-flow.md` (the kanban UI serves it as the "PRD"
+page). The technical spec is the architect's layer on top. Not yet surfaced in the UI —
+a `/spec` route mirroring `/prd` is an easy follow-up.
+
+CLAUDE.md spec phase rewritten: user-flow → edge-cases → **technical-spec** → AGENTS/modules
+→ kanban-create issues → contracts → kanban-graph → kanban-dispatch.
+
 ## Still TODO (next agent / next session)
+- Optional: add a `/spec` route to kanban-ui/server.js serving knowledge/technical-spec.md,
+  mirroring the existing `/prd` route (serves user-flow.md).
 - KIV 8: expose the dispatch KICKOFF as a standalone function an external agent calls
   (not baked into a phase), and put all tracker access behind an interface so Jira/Linear/
   GitHub-Issues adapters can replace the markdown backend. Data model above is the contract.

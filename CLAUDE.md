@@ -14,17 +14,17 @@ When `factory.json` exists in the project root, this session is the coordinator.
 **Spec phase (runs after feature list is confirmed, before any builder spawns):**
 1. For each confirmed feature, ask the user to walk through the user flow step by step. One feature at a time. Map each step to the feature it satisfies. Write to `knowledge/user-flow.md`.
 2. Derive negative edge cases from the flow. If the user has not provided them, build them yourself — do not ask unless a case requires a product decision (e.g. "what happens if payment fails mid-checkout?").
-3. Decompose the user flow into atomic issues and create each with `kanban-create`. The issue carries all the roadmap data — there is no separate handoff to author:
+3. Write the technical spec at `knowledge/technical-spec.md` (template in templates/). This is the architect's primary deliverable and the single source of design truth — everything below is derived from it. It captures: system overview, tech stack + decisions, data model, module decomposition, the component/issue map, interfaces + contracts, external infrastructure, build sequencing/milestones, cross-cutting concerns, testing strategy, non-goals, open questions. Parallelise research (Agent() tool, Sonnet) to inform its decisions.
+4. Extract the module registry from the spec: AGENTS.md (human-readable, [[backlinks]]) and modules.json (machine-readable).
+5. Decompose the spec's component/issue map into atomic issues, creating each with `kanban-create`. Every field comes straight from the spec — there is no separate handoff to author:
    ```
    kanban-create <issue> --feature <name> --title "<what to build>" --milestone <N> \
      --intent "..." --build "..." --success "..." --testing "..." \
      --depends-on <iss-a,iss-b> --needs-infra "Stripe account, OPENAI_API_KEY" --links "[[module]],[[iss]]"
    ```
-   `--depends-on` = other issues this waits on. `--needs-infra` = external infra the user must set up (each surfaces as NEEDS_SETUP). `--milestone` + deps express what to build and when. Status starts NOT_STARTED; no port is assigned until NEEDS_TESTING.
-4. kanban-create scaffolds an empty contract stub per dependency edge at `knowledge/contracts/<issue>-<dep>.md`. Fill each with the exact shape the dependency produces (endpoint path, request/response schema, event signature, data model). The dependent issue builds against it and mocks it; the real implementation is not required to start.
-5. Run `kanban-graph` to verify the roadmap: no cycles, no dangling deps, and review the build waves (what is parallel, what waits) and the external-infra rollup.
-6. Parallelise research using Agent() tool (not tmux) — Sonnet model for research agents
-7. Write AGENTS.md (human-readable module registry with [[backlinks]]) and modules.json (machine-readable)
+   `--depends-on` = other issues this waits on (spec §6). `--needs-infra` = external infra the user must set up (spec §7; each surfaces as NEEDS_SETUP). `--milestone` + deps express what to build and when (spec §8). Status starts NOT_STARTED; no port is assigned until NEEDS_TESTING.
+6. kanban-create scaffolds an empty contract stub per dependency edge at `knowledge/contracts/<issue>-<dep>.md`. Fill each from spec §6 with the exact shape the dependency produces (endpoint path, request/response schema, event signature, data model). The dependent issue builds against it and mocks it; the real implementation is not required to start.
+7. Run `kanban-graph` to verify the roadmap: no cycles, no dangling deps, and review the build waves (what is parallel, what waits) and the external-infra rollup against spec §8.
 8. Dispatch builders via `kanban-dispatch` (calls spawn-builder.sh once per issue, creating each git worktree). spawn-builder uses the issue you created — it does not overwrite it. Each builder gets a port at its NEEDS_TESTING transition.
 
 **Coordination loop (reactive — no polling):**

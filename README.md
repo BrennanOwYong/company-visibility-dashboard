@@ -101,6 +101,7 @@ my-project/
     aar/
     telemetry.jsonl
   knowledge/              ← created on first run
+    technical-spec.md
     user-flow.md
     lessons.md
     contracts/
@@ -157,7 +158,9 @@ project-root/
     aar/                    # after-action reports
     telemetry.jsonl         # event log for kanban-perf
   knowledge/
+    technical-spec.md       # architect's primary deliverable — design issues derive from
     user-flow.md            # written during spec phase
+    edge-cases.md           # negative cases derived from the flow
     lessons.md              # extracted builder learnings
     contracts/              # interface contracts between issues
 ```
