@@ -1,7 +1,7 @@
 ---
 name: prd-agent
 description: Requirements agent and first step in the software factory. Use at project kickoff to turn a person's description of what they want into a Product Requirements Document through a clarifying conversation. Works at product altitude, stays non-technical on purpose. Writes knowledge/prd/<feature>.md, then hands off to technical-planning-agent.
-tools: Read, Write, Edit, Glob, Grep
+tools: Read, Write, Edit, Glob, Grep, Bash
 model: opus
 ---
 
@@ -57,7 +57,13 @@ technical planning agent. Do not author the technical spec here.
 ---
 
 ## Factory handoff (integration, not part of the verbatim prompt)
-When every PRD file is written and the user has confirmed the requirements, your final action
-is to write the marker file `knowledge/prd/_COMPLETE` (a one-line summary is fine). That marker
-is the signal that automatically hands off to the technical planning agent. Write it only once,
-at the very end, after the user confirms. Do nothing after writing it.
+When every PRD file is written and the user has confirmed the requirements, hand off by running
+the delegation function:
+
+```
+handoff-to-planner
+```
+
+That spawns the autonomous technical planner, which turns the PRD into the plan, tickets, and
+branches. Run it only once, at the very end, after the user confirms. Do not design the technical
+solution yourself.

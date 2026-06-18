@@ -276,23 +276,33 @@ Natives used (verified via claude-code-guide against the docs):
 - `Stop` hook fires when an interactive session finishes a turn; multiple Stop entries all run;
   the hook gets JSON on stdin including `agent_type`, so a script knows which agent stopped.
 
-Wiring:
+SUPERSEDED by the `/hi` + explicit-function workflow (user choice 2026-06-18, below). The old
+Stop-hook auto-handoff (`bin/hook-handoff` + the `knowledge/prd/_COMPLETE` marker) was removed:
+the user preferred an explicit delegation function over a marker+hook, and declined a default
+`agent` setting. Kept for history only.
+
+Wiring (current):
 - `bin/spawn-agent <name> [msg]` — generic spawner: tmux session in the project root running
   `claude --agent <name>`, boot settle, mark idle, deliver kickoff via the delegation queue.
-  Idempotent (skips if the session exists). `CLAUDE_BIN` override for testing. No worktree
-  (planning agents work in the root, unlike spawn-builder).
-- `bin/hook-handoff` — Stop hook. Reads stdin; if the stopping agent is `prd-agent` (agent_type,
-  falling back to tmux session name) AND `knowledge/prd/_COMPLETE` exists AND no guard yet, it
-  touches the guard `kanban/.handoff-prd-done` and runs spawn-agent for technical-planning-agent
-  with a kickoff. Fires exactly once; always exits 0. Logs to `kanban/handoff.log`.
-- `prd-agent.md` gains a factory-addendum (kept separate from the verbatim prompt): its final
-  action is to write `knowledge/prd/_COMPLETE` after the user confirms. That marker is the signal.
-- factory-init registers `hook-handoff` as a second user-level Stop hook (idempotent merge).
+  Idempotent. `CLAUDE_BIN` override for testing. No worktree (planning agents work in the root).
+- SessionStart (`factory-init.sh`): for a DEFAULT (no-agent) session it prints the onboarding
+  message telling the user to type `/hi`; for a spawned `--agent` session (agent_type present on
+  stdin) it stays quiet so the agent's own prompt governs.
+- `/hi` (`.claude/commands/hi.md`): turns the current session into the PM — it reads
+  `.claude/agents/prd-agent.md` and adopts it, converses, writes `knowledge/prd/<feature>.md`.
+- `bin/handoff-to-planner` — the explicit delegation FUNCTION the PM runs once the PRD is
+  confirmed. Logs `handoff` (trigger=function) and calls spawn-agent for technical-planning-agent.
+- `prd-agent.md` addendum: when the PRD is confirmed, run `handoff-to-planner` (prd-agent now has
+  Bash for this). No marker, no Stop hook.
 
-Flow: PM session (`claude --agent prd-agent`) converses → writes PRDs → writes `_COMPLETE` →
-Stop fires → hook-handoff spawns `claude --agent technical-planning-agent` with a kickoff → the
-planner plans, passes its gate, invokes roadmap-and-branching → kanban-dispatch spawns builders.
-planner→builders needs no hook (the skill calls kanban-dispatch directly).
+Flow: user runs `claude` → SessionStart explains, points to `/hi` → user runs `/hi` → session
+becomes the PM → gathers requirements, writes PRDs → PM runs `handoff-to-planner` → spawns
+`claude --agent technical-planning-agent` (autonomous) → planner plans, invokes
+roadmap-and-branching → kanban populated with tickets+branches. CLAUDE.md intro reframed so a
+default session onboards to `/hi` instead of asserting coordinator mode (kanban rules untouched).
+
+Tested (CLAUDE_BIN=true): onboarding shows for default session, suppressed for agent sessions;
+handoff-to-planner spawns the planner and logs handoff+agent_spawned. Live `claude` not exercised.
 
 PLANNER IS AUTONOMOUS (user correction 2026-06-18): only the PM converses. The planner never
 talks to the user. A factory-execution addendum in `technical-planning-agent.md` overrides the

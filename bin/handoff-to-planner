@@ -1,0 +1,17 @@
+#!/bin/bash
+# handoff-to-planner [kickoff message]
+# The PM (prd-agent) calls this once the PRD is written and the user has confirmed it.
+# Explicit delegation: spawns the autonomous technical-planning-agent in its own session
+# and logs the handoff to kanban/agent-events.jsonl. This replaces the old Stop-hook.
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(pwd)}"
+
+MSG="${1:-The PRD is ready in knowledge/prd/ (and acceptance contracts in knowledge/contracts/acceptance/ if present). Produce the validated technical plan (per-feature plans, derived architecture, interface contracts), pass your self-hardening gate, then invoke the roadmap-and-branching skill to create the tickets and branches. Run autonomously; do not wait for the user.}"
+
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/factory-log" handoff from=prd-agent to=technical-planning-agent trigger=function
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/spawn-agent" technical-planning-agent "$MSG"
+
+echo "[handoff] technical-planning-agent spawned and given the plan kickoff."
+echo "[handoff] watch it with: tmux attach -t technical-planning-agent"

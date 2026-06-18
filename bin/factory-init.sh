@@ -50,7 +50,6 @@ node -e '
     s.hooks[event].push({hooks:[{type:"command",command:"bash "+path.join(dir,script)}]});
   }
   ensure("Stop","hook-agent-idle");
-  ensure("Stop","hook-handoff");
   ensure("UserPromptSubmit","hook-agent-busy");
   fs.mkdirSync(path.dirname(f),{recursive:true});
   fs.writeFileSync(f, JSON.stringify(s,null,2));
@@ -139,7 +138,20 @@ while IFS= read -r repo_path; do
   [ -n "$repo_path" ] && install_hook "$repo_path"
 done <<< "$REPOS"
 
-echo "FACTORY ACTIVE | project: $(basename $PROJECT_ROOT) | coordinator: $SESSION"
-echo "You are the coordinator for this project. Run pre-flight with the user on their first message."
-echo "Pre-flight: clarify features needed, which repos each belongs in, tools/access required, GitHub repo (optional), then plan."
-echo "Repos available: $(node -e "try{const f=require('$PROJECT_ROOT/factory.json');console.log(Object.keys(f.repos||{}).join(', '))}catch(e){console.log('(single-repo)')}" 2>/dev/null)"
+# Onboarding message. Only shown for a default (no-agent) session; spawned agent
+# sessions (--agent ...) carry their own prompt and run autonomously.
+AGENT_TYPE=""
+[ ! -t 0 ] && AGENT_TYPE=$(cat 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('agent_type','') or '')" 2>/dev/null)
+
+echo "FACTORY ACTIVE | project: $(basename $PROJECT_ROOT)"
+if [ -z "$AGENT_TYPE" ]; then
+  echo ""
+  echo "Welcome to the software factory. How this works:"
+  echo "  1. Type /hi to begin. I become your Product Manager and gather your"
+  echo "     requirements through a short conversation (saved to knowledge/prd/)."
+  echo "  2. Once you confirm them, I hand off to the technical planner, which"
+  echo "     designs the plan and creates the tickets and feature branches."
+  echo ""
+  echo "[assistant] Greet the user in one or two sentences and tell them to type /hi to start."
+  echo "Do not gather requirements or act as coordinator until they run /hi."
+fi

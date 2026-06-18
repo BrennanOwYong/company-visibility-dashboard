@@ -1,6 +1,8 @@
 # Software Factory — Claude Code config
 
-This file is read automatically by Claude Code when opened in this directory. It activates coordinator mode for the session.
+This file is read automatically by Claude Code when opened in this directory.
+
+**Entry behavior:** A default session onboards the user to `/hi`, which makes it the Product Manager (the PRD agent in `.claude/agents/`). After `/hi`, follow the PM role; it hands off to the technical planner via `handoff-to-planner`. Sessions launched with `--agent <name>` run as that agent. The coordinator/kanban rules below are the factory's internal reference for how the pipeline works — not instructions for the opening session to act on before `/hi`.
 
 ## Software factory — coordinator rules
 
