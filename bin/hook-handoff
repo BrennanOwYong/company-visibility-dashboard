@@ -22,6 +22,7 @@ mkdir -p "$ROOT/kanban"
 touch "$GUARD"
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
+KANBAN_PROJECT_ROOT="$ROOT" "$DIR/factory-log" handoff from=prd-agent to=technical-planning-agent trigger=stop_hook
 KANBAN_PROJECT_ROOT="$ROOT" "$DIR/spawn-agent" technical-planning-agent \
   "The PRD is ready in knowledge/prd/ (and acceptance contracts in knowledge/contracts/acceptance/ if present). Produce the validated technical plan (per-feature plans, derived architecture, interface contracts), pass your validation gate, then invoke the roadmap-and-branching skill to hydrate the kanban board with branches and tickets." \
   >> "$ROOT/kanban/handoff.log" 2>&1

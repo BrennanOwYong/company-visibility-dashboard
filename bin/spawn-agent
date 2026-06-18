@@ -25,6 +25,7 @@ if ! tmux has-session -t "$AGENT" 2>/dev/null; then
   tmux send-keys -t "$AGENT" "${CLAUDE_BIN:-claude} --dangerously-skip-permissions --agent $AGENT" Enter
   sleep "${AGENT_BOOT_SECONDS:-5}"
   KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/agent-state" "$AGENT" idle
+  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/factory-log" agent_spawned agent="$AGENT"
 fi
 
 if [ -n "$MSG" ]; then

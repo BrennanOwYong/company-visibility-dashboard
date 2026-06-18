@@ -294,6 +294,18 @@ Stop fires → hook-handoff spawns `claude --agent technical-planning-agent` wit
 planner plans, passes its gate, invokes roadmap-and-branching → kanban-dispatch spawns builders.
 planner→builders needs no hook (the skill calls kanban-dispatch directly).
 
+PLANNER IS AUTONOMOUS (user correction 2026-06-18): only the PM converses. The planner never
+talks to the user. A factory-execution addendum in `technical-planning-agent.md` overrides the
+verbatim prompt's "present for review and approval" step: the gate is self-hardening only; if a
+plan is infeasible it writes `knowledge/_PLAN_BLOCKED.md` and stops (no user prompt). The
+deterministic Stop-hook handoff matches the Condensed Wisdom principle "use control flow for
+control flow" — the PM produces + signals, the deterministic layer delegates.
+
+TELEMETRY (added 2026-06-18): `bin/factory-log <event> [k=v...]` appends timestamped JSON to
+`kanban/agent-events.jsonl`. hook-handoff logs `handoff` (with trigger=stop_hook) and spawn-agent
+logs `agent_spawned`. To verify the handoff was automatic: `cat kanban/agent-events.jsonl` and
+look for the `handoff` event with `trigger=stop_hook` (no manual command produced it).
+
 Tested (CLAUDE_BIN=true, fake root): wrong agent no-op; prd-agent without marker no-op; with
 marker fires once (guard + planner session + delivered kickoff); second Stop blocked by guard.
 Not exercised: a real `claude --agent` launch (needs the live CLI); the launch command + queue
