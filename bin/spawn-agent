@@ -1,0 +1,34 @@
+#!/bin/bash
+# spawn-agent <agent-name> [initial message...]
+# Launches a Claude Code session running AS the named .claude/agents/<name> agent,
+# in the project root, inside a tmux session, then delivers an optional kickoff
+# message through the delegation queue once the session is idle.
+# Idempotent: if the session already exists it only (re)delivers the message.
+# Unlike spawn-builder there is no worktree/branch — planning agents work in the root.
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+AGENT="$1"; shift || true
+MSG="$*"
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(cat "$HOME/.claude/.coordinator-root" 2>/dev/null || pwd)}"
+
+if [ -z "$AGENT" ]; then
+  echo "Usage: spawn-agent <agent-name> [message]"
+  exit 1
+fi
+
+if ! tmux has-session -t "$AGENT" 2>/dev/null; then
+  tmux new-session -d -s "$AGENT" -c "$PROJECT_ROOT" \
+    -e "PATH=$PROJECT_ROOT/bin:$PATH" \
+    -e "KANBAN_PROJECT_ROOT=$PROJECT_ROOT"
+  # CLAUDE_BIN override exists for testing; defaults to the real CLI
+  tmux send-keys -t "$AGENT" "${CLAUDE_BIN:-claude} --dangerously-skip-permissions --agent $AGENT" Enter
+  sleep "${AGENT_BOOT_SECONDS:-5}"
+  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/agent-state" "$AGENT" idle
+fi
+
+if [ -n "$MSG" ]; then
+  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/tmux-delegate" "$AGENT" "$MSG"
+fi
+
+echo "Agent session: $AGENT  (tmux attach -t $AGENT)"

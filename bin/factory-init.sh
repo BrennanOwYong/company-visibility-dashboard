@@ -50,6 +50,7 @@ node -e '
     s.hooks[event].push({hooks:[{type:"command",command:"bash "+path.join(dir,script)}]});
   }
   ensure("Stop","hook-agent-idle");
+  ensure("Stop","hook-handoff");
   ensure("UserPromptSubmit","hook-agent-busy");
   fs.mkdirSync(path.dirname(f),{recursive:true});
   fs.writeFileSync(f, JSON.stringify(s,null,2));

@@ -267,13 +267,49 @@ OPEN RECONCILIATIONS (next session):
 - `kanban-create` scaffolds flat `knowledge/contracts/<issue>-<dep>.md`; the planner writes
   `knowledge/contracts/iface/<seam>.md`. Align the paths (have the skill point --links at the real
   iface contracts, or move kanban-create's stub path under contracts/iface).
-- AUTO-HANDOFF NOT WIRED. PM writes the PRD and stops; making it AUTOMATICALLY trigger the planner
-  needs a trigger (PM Stop hook → tmux-delegate launches the planner). Both agents need user
-  interaction (PM converses; planner's gate needs approval), so they run as sessions, not nested
-  subagents. User will test manual handoff first; wire the auto-trigger next if wanted.
+## PM → planner auto-handoff (WIRED 2026-06-18)
+
+Natives used (verified via claude-code-guide against the docs):
+- `claude --agent <name>` runs a whole session AS that agent (combinable with
+  `--dangerously-skip-permissions`). This is how each agent runs as a full interactive session
+  (needed because both converse with the user; subagents cannot).
+- `Stop` hook fires when an interactive session finishes a turn; multiple Stop entries all run;
+  the hook gets JSON on stdin including `agent_type`, so a script knows which agent stopped.
+
+Wiring:
+- `bin/spawn-agent <name> [msg]` — generic spawner: tmux session in the project root running
+  `claude --agent <name>`, boot settle, mark idle, deliver kickoff via the delegation queue.
+  Idempotent (skips if the session exists). `CLAUDE_BIN` override for testing. No worktree
+  (planning agents work in the root, unlike spawn-builder).
+- `bin/hook-handoff` — Stop hook. Reads stdin; if the stopping agent is `prd-agent` (agent_type,
+  falling back to tmux session name) AND `knowledge/prd/_COMPLETE` exists AND no guard yet, it
+  touches the guard `kanban/.handoff-prd-done` and runs spawn-agent for technical-planning-agent
+  with a kickoff. Fires exactly once; always exits 0. Logs to `kanban/handoff.log`.
+- `prd-agent.md` gains a factory-addendum (kept separate from the verbatim prompt): its final
+  action is to write `knowledge/prd/_COMPLETE` after the user confirms. That marker is the signal.
+- factory-init registers `hook-handoff` as a second user-level Stop hook (idempotent merge).
+
+Flow: PM session (`claude --agent prd-agent`) converses → writes PRDs → writes `_COMPLETE` →
+Stop fires → hook-handoff spawns `claude --agent technical-planning-agent` with a kickoff → the
+planner plans, passes its gate, invokes roadmap-and-branching → kanban-dispatch spawns builders.
+planner→builders needs no hook (the skill calls kanban-dispatch directly).
+
+Tested (CLAUDE_BIN=true, fake root): wrong agent no-op; prd-agent without marker no-op; with
+marker fires once (guard + planner session + delivered kickoff); second Stop blocked by guard.
+Not exercised: a real `claude --agent` launch (needs the live CLI); the launch command + queue
+delivery are verified, the persona load is not.
+
+OPEN RECONCILIATIONS (next session):
+- `templates/technical-spec.md` (monolithic, added 2026-06-14) is superseded by the per-feature
+  `knowledge/spec/<feature>.md` + `architecture.md` layout. Decide: keep as a thin overview or retire.
+- `kanban-create` scaffolds flat `knowledge/contracts/<issue>-<dep>.md`; the planner writes
+  `knowledge/contracts/iface/<seam>.md`. Align the paths (have the skill point --links at the real
+  iface contracts, or move kanban-create's stub path under contracts/iface).
+- Acceptance contracts (`knowledge/contracts/acceptance/`) have no authoring agent yet. The
+  planner reads them as fixed input; today nothing writes them. Decide who authors them (PM output,
+  a separate step, or fold into the PM) before relying on the planner's acceptance reachability.
 
 ## Still TODO (next agent / next session)
-- Wire the PM→planner auto-handoff trigger (above).
 - Optional: add a `/spec` route to kanban-ui/server.js serving knowledge/technical-spec.md,
   mirroring the existing `/prd` route (serves user-flow.md).
 - KIV 8: expose the dispatch KICKOFF as a standalone function an external agent calls
