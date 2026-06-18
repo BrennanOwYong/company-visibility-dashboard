@@ -11,8 +11,8 @@
 /kanban/agents/
 /kanban/aar/
 /kanban/user-test-cards/
-/kanban/telemetry.jsonl
-/kanban/coordinator-log.jsonl
+/kanban/*.jsonl
+/kanban/*.log
 
 # Runtime knowledge outputs (source docs like KIV.md and handoffs/ stay tracked)
 /knowledge/user-flow.md

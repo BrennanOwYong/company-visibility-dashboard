@@ -40,6 +40,8 @@ printf '{"ts":%s,"issue":"%s","from":"%s","to":"%s","notes":%s}\n' \
 
 echo "[$ISSUE] $STATUS${NOTES:+ — $NOTES}"
 
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" factory-log task_update issue="$ISSUE" status="$STATUS" from="${PREV_STATUS:-NONE}"
+
 # NEEDS_TESTING is the only point a port is assigned — a port is a testing-phase
 # resource (serving the built app), not needed during the build. Allocate the first
 # free port from 3001 upward, skipping ports already held by other tickets.

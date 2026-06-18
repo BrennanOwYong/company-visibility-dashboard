@@ -54,6 +54,8 @@ git -C "$REPO_ROOT" worktree add "$WORKTREE_PATH" -b "feat/$ISSUE" 2>/dev/null |
   exit 1
 }
 
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR_SB/factory-log" branch_created issue="$ISSUE" branch="feat/$ISSUE"
+
 # Copy context files into worktree
 cp "$HANDOFF" "$WORKTREE_PATH/HANDOFF.md"
 [ -f "$PROJECT_ROOT/AGENTS.md" ]    && cp "$PROJECT_ROOT/AGENTS.md"    "$WORKTREE_PATH/AGENTS.md"
@@ -93,7 +95,7 @@ tmux new-session -d -s "$ISSUE" -c "$WORKTREE_PATH" \
   -e "KANBAN_PROJECT_ROOT=$PROJECT_ROOT" \
   -e "FEATURE_NAME=$ISSUE"
 
-tmux send-keys -t "$ISSUE" "claude --dangerously-skip-permissions" Enter
+tmux send-keys -t "$ISSUE" "${CLAUDE_BIN:-claude} --dangerously-skip-permissions" Enter
 
 # Bootstrap readiness: wait for the claude TUI to settle on first boot, then mark idle.
 # This one-time settle covers boot only; steady-state readiness is hook-driven (Stop=idle).
@@ -103,6 +105,8 @@ KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR_SB/agent-state" "$ISSUE" idle
 # Deliver the first instruction through the delegator queue — never raw send-keys.
 KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR_SB/tmux-delegate" "$ISSUE" \
   "Read HANDOFF.md, AGENTS.md, modules.json, and knowledge/lessons.md. Mark started with: kanban-update $ISSUE IN_PROGRESS \"starting\". Then build. States: IN_PROGRESS while building, NEEDS_SETUP if you need the user to set up external infra you cannot, NEEDS_TESTING when the build is done and ready to test (a port is assigned then)."
+
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR_SB/factory-log" task_dispatched issue="$ISSUE" feature="$FEATURE_NAME"
 
 echo ""
 echo "Builder spawned: $ISSUE"

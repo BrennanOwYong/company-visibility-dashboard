@@ -302,9 +302,23 @@ deterministic Stop-hook handoff matches the Condensed Wisdom principle "use cont
 control flow" — the PM produces + signals, the deterministic layer delegates.
 
 TELEMETRY (added 2026-06-18): `bin/factory-log <event> [k=v...]` appends timestamped JSON to
-`kanban/agent-events.jsonl`. hook-handoff logs `handoff` (with trigger=stop_hook) and spawn-agent
-logs `agent_spawned`. To verify the handoff was automatic: `cat kanban/agent-events.jsonl` and
-look for the `handoff` event with `trigger=stop_hook` (no manual command produced it).
+`kanban/agent-events.jsonl` — the single stream of SYSTEM ACTIONS (not coding-session content).
+Events: `handoff` (hook-handoff, trigger=stop_hook), `agent_spawned` (spawn-agent),
+`ticket_created` (kanban-create), `branch_created` + `task_dispatched` (spawn-builder),
+`task_update` (kanban-update). These are exactly the user's four loggable items: handoff,
+artefact insertion (tickets+branches), kanban triggering each task, task updates to kanban.
+Verify with `cat kanban/agent-events.jsonl`.
+
+VERIFIED 2026-06-18 (throwaway git repo, CLAUDE_BIN=true): kanban-create makes tickets,
+kanban-dispatch + spawn-builder create the `feat/<issue>` worktrees/branches, kanban-update
+records a status change — and all of ticket_created/branch_created/task_dispatched/task_update
+land in agent-events.jsonl. Real `claude` builder sessions not launched (stubbed); branch+ticket
+creation itself is real git.
+
+Note on the root check (user asked the rationale, not a change): it exists because (1) the hooks
+are user-level/global and fire for every claude session, so the check guards them to no-op outside
+a factory project; (2) builders run in worktrees whose pwd is not the project root, so scripts
+need KANBAN_PROJECT_ROOT / the sentinel to locate the central kanban/. Left as-is.
 
 Tested (CLAUDE_BIN=true, fake root): wrong agent no-op; prd-agent without marker no-op; with
 marker fires once (guard + planner session + delivered kickoff); second Stop blocked by guard.

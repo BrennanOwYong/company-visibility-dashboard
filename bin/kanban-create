@@ -13,6 +13,7 @@
 # layer will let the same primitive target external trackers (Jira/Linear/...) — see KIV.
 set -e
 
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(pwd)}"
 KANBAN_DIR="$PROJECT_ROOT/kanban"
 
@@ -126,6 +127,8 @@ ${TESTING:-(how this gets tested and what state to load — architect fills)}
 ## Feedback from user
 (none)
 EOF
+
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SELF_DIR/factory-log" ticket_created issue="$ISSUE" feature="$FEATURE" dependsOn="$DEPENDS"
 
 echo "Created issue: $KFILE"
 [ -n "$DEPENDS" ]       && echo "  dependsOn : $DEPENDS"
