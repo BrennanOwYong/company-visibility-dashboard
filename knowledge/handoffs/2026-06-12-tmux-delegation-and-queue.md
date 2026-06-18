@@ -234,7 +234,46 @@ a `/spec` route mirroring `/prd` is an easy follow-up.
 CLAUDE.md spec phase rewritten: user-flow → edge-cases → **technical-spec** → AGENTS/modules
 → kanban-create issues → contracts → kanban-graph → kanban-dispatch.
 
+## PM + Architect agent personas + roadmap skill (added 2026-06-18)
+
+Grounded in the user's Notion (Condensed Wisdom + the PRD Agent / Technical Planning Agent
+specs). The three-agent spec: PRD agent (product truth) → acceptance contracts (definition of
+done) → technical planning agent (how + build map) → builders → adversarial validation gate.
+Each a separate context (instruction budget + bias guard).
+
+Created from the verbatim Notion prompts:
+- `.claude/agents/prd-agent.md` — requirements agent, product altitude, stays non-technical.
+  Writes `knowledge/prd/<feature>.md`, then hands off. tools: Read/Write/Edit/Glob/Grep. opus.
+- `.claude/agents/technical-planning-agent.md` — features lead, architecture derived to fit.
+  Per-feature plan → derive architecture → iface contracts + acceptance reachability → plan
+  validation gate (rubric, self-harden + independent review) → invoke roadmap-and-branching.
+  tools add Bash/Task/WebSearch/WebFetch; skills: roadmap-and-branching. opus.
+- `skills/roadmap-and-branching/SKILL.md` — the planner's extra skill. Decomposes the validated
+  plan by the contract-writable-seam test (separable→parallel tickets, coupled→sequenced),
+  hydrates one self-sufficient ticket per atomic task via `kanban-create` (intent/build/success/
+  testing/deps/infra/links all pulled from the plan — the one-and-done builder bar), verifies
+  with `kanban-graph`, records `knowledge/build-plan.md`, then `kanban-dispatch` spawns branches.
+- factory-init now installs ALL `skills/*` (was kanban-only). Agents are project-scoped in
+  `.claude/agents/` (auto-discovered; run via `claude --agent <name>`).
+
+Knowledge layout the specs introduce (richer than the monolithic technical-spec.md):
+`knowledge/prd/<feature>.md`, `knowledge/contracts/acceptance/<feature>.md`,
+`knowledge/spec/<feature>.md`, `knowledge/architecture.md`, `knowledge/contracts/iface/<seam>.md`,
+`knowledge/platform/*.md`, `knowledge/build-plan.md`. All gitignored as runtime outputs.
+
+OPEN RECONCILIATIONS (next session):
+- `templates/technical-spec.md` (monolithic, added 2026-06-14) is superseded by the per-feature
+  `knowledge/spec/<feature>.md` + `architecture.md` layout. Decide: keep as a thin overview or retire.
+- `kanban-create` scaffolds flat `knowledge/contracts/<issue>-<dep>.md`; the planner writes
+  `knowledge/contracts/iface/<seam>.md`. Align the paths (have the skill point --links at the real
+  iface contracts, or move kanban-create's stub path under contracts/iface).
+- AUTO-HANDOFF NOT WIRED. PM writes the PRD and stops; making it AUTOMATICALLY trigger the planner
+  needs a trigger (PM Stop hook → tmux-delegate launches the planner). Both agents need user
+  interaction (PM converses; planner's gate needs approval), so they run as sessions, not nested
+  subagents. User will test manual handoff first; wire the auto-trigger next if wanted.
+
 ## Still TODO (next agent / next session)
+- Wire the PM→planner auto-handoff trigger (above).
 - Optional: add a `/spec` route to kanban-ui/server.js serving knowledge/technical-spec.md,
   mirroring the existing `/prd` route (serves user-flow.md).
 - KIV 8: expose the dispatch KICKOFF as a standalone function an external agent calls

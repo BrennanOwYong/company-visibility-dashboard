@@ -22,9 +22,13 @@ if ! grep -qF "$SCRIPT_DIR" "$HOME/.bashrc" 2>/dev/null; then
   echo "export PATH=\"$SCRIPT_DIR:\$PATH\" # claude-factory" >> "$HOME/.bashrc"
 fi
 
-# Copy kanban skill so builders can invoke Skill({skill:"kanban"})
-mkdir -p "$HOME/.claude/skills/kanban"
-cp "$SCRIPT_DIR/../skills/kanban/SKILL.md" "$HOME/.claude/skills/kanban/SKILL.md" 2>/dev/null || true
+# Install all repo skills so agents can invoke them (kanban, roadmap-and-branching, ...)
+for SKILL_DIR in "$SCRIPT_DIR/../skills/"*/; do
+  [ -d "$SKILL_DIR" ] || continue
+  SKILL_NAME=$(basename "$SKILL_DIR")
+  mkdir -p "$HOME/.claude/skills/$SKILL_NAME"
+  cp "$SKILL_DIR/SKILL.md" "$HOME/.claude/skills/$SKILL_NAME/SKILL.md" 2>/dev/null || true
+done
 
 # Install /hi global slash command
 mkdir -p "$HOME/.claude/commands"
