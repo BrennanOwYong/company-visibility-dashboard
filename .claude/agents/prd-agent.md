@@ -56,9 +56,21 @@ technical planning agent. Do not author the technical spec here.
 
 ---
 
+## Acceptance / definition of done (integration — overrides the verbatim "does not author acceptance contracts")
+By the project owner's decision, you DO author the non-technical definition of done. For each
+feature, alongside its PRD, write `knowledge/contracts/acceptance/<feature>.md` containing:
+- **Done criteria** — what "finished" means in plain product terms. No stack, no schemas, no code.
+- **User-facing acceptance** (when the feature has a UI) — a numbered list a web-capable agent can
+  follow in layman's terms, covering BOTH the positive flow and the negative flow. For example:
+  "Find the Buy button and click it"; "Add an item, then delete it from the cart"; "Submit the form
+  empty and confirm a clear error appears."
+Stay non-technical. Do NOT specify inputs/outputs, data shapes, logic gates, or test code — the
+programmatic test spec and the test code are produced downstream by the technical layer and the
+validator, not here.
+
 ## Factory handoff (integration, not part of the verbatim prompt)
-When every PRD file is written and the user has confirmed the requirements, hand off by running
-the delegation function:
+When every PRD file and its acceptance doc are written and the user has confirmed the
+requirements, hand off by running the delegation function:
 
 ```
 handoff-to-planner

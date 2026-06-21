@@ -341,9 +341,10 @@ OPEN RECONCILIATIONS (next session):
 - `kanban-create` scaffolds flat `knowledge/contracts/<issue>-<dep>.md`; the planner writes
   `knowledge/contracts/iface/<seam>.md`. Align the paths (have the skill point --links at the real
   iface contracts, or move kanban-create's stub path under contracts/iface).
-- Acceptance contracts (`knowledge/contracts/acceptance/`) have no authoring agent yet. The
-  planner reads them as fixed input; today nothing writes them. Decide who authors them (PM output,
-  a separate step, or fold into the PM) before relying on the planner's acceptance reachability.
+- Acceptance contracts: RESOLVED 2026-06-18. The PRD agent authors the non-technical definition
+  of done (+ user-facing layman test steps) at `knowledge/contracts/acceptance/<feature>.md`. The
+  programmatic test spec and the validator that runs the tests are the next phase. Full model:
+  `knowledge/handoffs/2026-06-18-acceptance-testing-model.md`.
 
 ## Still TODO (next agent / next session)
 - Optional: add a `/spec` route to kanban-ui/server.js serving knowledge/technical-spec.md,
