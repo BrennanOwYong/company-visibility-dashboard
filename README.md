@@ -9,6 +9,25 @@ claude .
 # then type: /hi
 ```
 
+## How the factory works
+
+```mermaid
+flowchart TD
+    U([Owner describes what to build]) --> PM[PRD Agent - /hi<br/>requirements at product altitude]
+    PM -->|knowledge/prd + acceptance contracts| HO{{handoff-to-planner}}
+    HO --> TP[Technical Planning Agent<br/>feature plans, architecture, interface contracts, gate]
+    TP --> DR[Deep Review per task<br/>assumptions vs live code index, re-plan never impossible]
+    DR --> RB[Roadmap and Branching skill<br/>build-plan.yaml + one ticket per task]
+    RB -->|tickets via tracker adapter| KB[(Kanban board)]
+    KB --> DSP{{Dispatch - card done triggers next}}
+    DSP --> BLD[Builder agents in tmux<br/>fresh context per card, build + self-test]
+    BLD --> VG[Adversarial Validation Gate<br/>fresh-context validator on a different model<br/>checks the running artifact vs acceptance]
+    VG -->|pass| DONE([Owner reviews and approves])
+    VG -->|fail| BLD
+```
+
+Each arrow is a separate context, by design: product intent, technical planning, and validation never share a window. Live today: PRD agent, handoff, technical planner, roadmap-and-branching, kanban, dispatch, builders. Deep Review and the Validation Gate are specified and being built.
+
 ## Prerequisites
 
 **tmux** is required. Builders run as parallel tmux sessions.
