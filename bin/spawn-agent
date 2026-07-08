@@ -25,7 +25,10 @@ case "$AGENT" in -*)
   echo "Agents available: $(ls "$PROJECT_ROOT/.claude/agents/" 2>/dev/null | sed 's/\.md$//' | tr '\n' ' ')"
   exit 1;;
 esac
-if [ ! -f "$PROJECT_ROOT/.claude/agents/$AGENT.md" ]; then
+# Only enforce the known-agent check when an agents registry actually exists (a real factory
+# root). A throwaway/test root with no .claude/agents/ dir is a degraded mode, not an error —
+# the dash-prefix guard above still blocks the `--help`-style footgun everywhere.
+if [ -d "$PROJECT_ROOT/.claude/agents" ] && [ ! -f "$PROJECT_ROOT/.claude/agents/$AGENT.md" ]; then
   echo "Unknown agent '$AGENT' — no $PROJECT_ROOT/.claude/agents/$AGENT.md"
   echo "Agents available: $(ls "$PROJECT_ROOT/.claude/agents/" 2>/dev/null | sed 's/\.md$//' | tr '\n' ' ')"
   exit 1

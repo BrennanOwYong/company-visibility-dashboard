@@ -40,10 +40,7 @@ tail -n +2 "$INBOX" > "$INBOX.tmp" 2>/dev/null && mv "$INBOX.tmp" "$INBOX"
 MSG=$(printf '%s' "$MSG_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['msg'])" 2>/dev/null)
 [ -z "$MSG" ] && exit 0
 
-# Mark 'delivering' so a racing drain backs off (only idle sessions receive). Only the
-# UserPromptSubmit hook writes 'busy', which makes the state transition itself the POSITIVE
-# submission ack — text-absence checks proved unreliable (a message swallowed by a booting
-# TUI looks identical to a submitted one).
+# Mark 'delivering' so a racing drain backs off (only idle sessions receive).
 printf 'delivering\n' > "$STATE_FILE"
 
 # -l sends the text literally (no tmux key-name interpretation); Enter submits it
@@ -51,33 +48,55 @@ tmux send-keys -t "$AGENT" -l -- "$MSG"
 sleep 1
 tmux send-keys -t "$AGENT" Enter
 
-# Ack window must outlast the target's UserPromptSubmit hook chain (user-global sync hooks
-# run up to 90s BEFORE the busy write) — a short window here once requeued a message that had
-# in fact submitted, producing a duplicate turn and a premature idle.
-SNIPPET=$(printf '%s' "$MSG" | cut -c1-40)
+# Test-mode short-circuit: with a stubbed CLI (CLAUDE_BIN != claude, e.g. smoke-test) there is no
+# real TUI to show an active-turn marker, so the poll below would spin the full window on every
+# delivery. The stub only needs the send-keys to have fired; mark busy and return.
+if [ "${CLAUDE_BIN:-claude}" != "claude" ]; then
+  printf 'busy\n' > "$STATE_FILE"
+  echo "[drain] (test stub) delivered -> $AGENT"
+  exit 0
+fi
+
+# Submission is confirmed by the TUI's OWN active-turn marker, not by the state file. The
+# canonical delivery bug: when the Enter is swallowed (a boot/redraw/modal was showing when the
+# text was typed, so keystrokes never reached the input box), the UserPromptSubmit hook never
+# fires and a state-flip-only detector marks the agent busy anyway — a false-busy wedge that
+# loses the message. Instead poll for "a turn actually started":
+#   - the running-turn markers ("esc to interrupt" / the "· ↓ N tokens)" counter) — these appear
+#     ONLY while a turn is live, so their presence is an unambiguous positive ack; OR
+#   - the state file flipping off 'delivering' (the busy hook fired) — same conclusion.
+# If neither yet, decide stranded-vs-never-landed WITHOUT the old false-match risk: that risk only
+# existed because the old code matched the snippet with no active-turn gate, so a live turn's echo
+# looked like a stranding. Here the snippet check runs ONLY when no turn is active (so nothing was
+# submitted): snippet present => stranded in the box => Enter; snippet absent => never landed
+# (swallowed) => RE-TYPE the whole message.
+MARKERS='esc to interrupt|· ↓|tokens)'
+SNIPPET=$(printf '%s' "$MSG" | cut -c1-20)
 DELIVERED=0
 for _ in $(seq 1 30); do
   sleep 4
-  STATE_NOW=$(cat "$STATE_FILE" 2>/dev/null)
-  if [ "$STATE_NOW" != "delivering" ]; then DELIVERED=1; break; fi   # hook fired: submitted
-  # Not yet submitted. If the text is visibly stranded in the input box, press Enter again
-  # (a no-op on an empty box, so always safe).
-  tmux capture-pane -pJ -t "$AGENT" -S -8 2>/dev/null | grep -qF "$SNIPPET" && tmux send-keys -t "$AGENT" Enter
+  [ "$(cat "$STATE_FILE" 2>/dev/null)" != "delivering" ] && { DELIVERED=1; break; }
+  PANE=$(tmux capture-pane -pJ -t "$AGENT" -S -12 2>/dev/null)
+  if printf '%s' "$PANE" | grep -qE "$MARKERS"; then DELIVERED=1; break; fi   # a turn is live
+  if printf '%s' "$PANE" | grep -qF "$SNIPPET"; then
+    tmux send-keys -t "$AGENT" Enter                                          # stranded -> submit
+  else
+    tmux send-keys -t "$AGENT" -l -- "$MSG"; sleep 1; tmux send-keys -t "$AGENT" Enter   # never landed -> retype
+  fi
 done
 
 if [ "$DELIVERED" = 1 ]; then
+  # A turn is running. Resolve 'delivering' to 'busy' now (do not leave it: a >5min turn would
+  # otherwise trip the delivering-orphan self-heal and let a second message land mid-turn). The
+  # target's own Stop hook writes 'idle' at turn end and drains the next message.
+  printf 'busy\n' > "$STATE_FILE"
   echo "[drain] delivered -> $AGENT"
 else
-  # State never left 'delivering' within the ack window. The in-loop Enter-retries above already
-  # re-submit any message genuinely stranded in the input box (a no-op on an empty box), so a true
-  # stranding self-heals inside the window. Reaching here means either the message is being
-  # processed behind a slow UserPromptSubmit hook chain (the 'busy' write lags a long turn) or it
-  # never typed at all. Pane-snippet matching CANNOT distinguish "being processed" from "stranded":
-  # the delivered prompt and the agent's own reply both echo the message text into the pane, so the
-  # grep false-matches on a long turn and requeues a message that did submit — an infinite
-  # redelivery loop that starved the whole queue. So do NOT requeue on a pane match. Assume
-  # submitted and hand off to the Stop hook. A message that truly failed to submit surfaces via the
-  # sender's timeout, which is the loud, correct failure mode.
-  printf 'busy\n' > "$STATE_FILE"
-  echo "[drain] ack window elapsed -> assuming submitted, marked $AGENT busy"
+  # Genuine failure: no turn ever started (a persistent modal, a dead pane). Do NOT mark busy —
+  # that is the wedge. Requeue to the FRONT of the inbox and reset to 'idle' so the next drain
+  # (Stop hook / dispatch) retries; log loudly. A message truly undeliverable stays visibly queued
+  # instead of vanishing.
+  TMP="$INBOX.$$"; printf '%s\n' "$MSG_JSON" > "$TMP"; cat "$INBOX" >> "$TMP" 2>/dev/null; mv "$TMP" "$INBOX"
+  printf 'idle\n' > "$STATE_FILE"
+  echo "[drain] FAILED to deliver to $AGENT after window — requeued, left idle for retry" >&2
 fi

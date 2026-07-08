@@ -18,7 +18,7 @@ PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(pwd)}"
 KANBAN_DIR="$PROJECT_ROOT/kanban"
 
 ISSUE=""; FEATURE=""; TITLE=""; MILESTONE=""; REPO=""
-DEPENDS=""; INFRA=""; LINKS=""; USER_FACING="true"
+DEPENDS=""; INFRA=""; LINKS=""; USER_FACING="true"; NEEDS_USER_TEST="true"; LANDING_URL=""
 INTENT=""; BUILD=""; SUCCESS=""; TESTING=""
 
 while [ $# -gt 0 ]; do
@@ -31,6 +31,8 @@ while [ $# -gt 0 ]; do
     --needs-infra)  INFRA="$2";       shift 2;;
     --links)        LINKS="$2";       shift 2;;
     --user-facing)  USER_FACING="$2"; shift 2;;
+    --needs-user-test) NEEDS_USER_TEST="$2"; shift 2;;
+    --landing-url)  LANDING_URL="$2"; shift 2;;
     --intent)       INTENT="$2";      shift 2;;
     --build)        BUILD="$2";       shift 2;;
     --success)      SUCCESS="$2";     shift 2;;
@@ -92,6 +94,8 @@ dependsOn: $DEPENDS
 needsInfra: $INFRA
 links: $LINKS
 user_facing: $USER_FACING
+needs_user_test: $NEEDS_USER_TEST
+landing_url: $LANDING_URL
 test_command:
 ---
 

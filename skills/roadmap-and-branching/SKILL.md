@@ -46,8 +46,12 @@ kanban-create <issue> --feature <feature-name> \
   --testing "<how to bring up the test state, and the acceptance assertions the validator will check on the running artifact>" \
   --depends-on <iss-a,iss-b> \
   --needs-infra "<external systems this task needs, e.g. Stripe account, OPENAI_API_KEY>" \
+  --needs-user-test <true|false> \
+  --landing-url "<the path the user lands on to test it, e.g. /popup or chrome://extensions — only for user-test tickets>" \
   --links   "[[architecture]],[[iface/<seam>]],[[<module>]],knowledge/technical/research/<tech>.md"
 ```
+
+Tag `--needs-user-test` on EVERY ticket — this is the one automatic decision that divides the board. Set it `true` when the atomic task produces something a person judges by feel or experience (a screen, a flow, a visible interaction, a perceptible behavior); set it `false` for pure plumbing with no human-perceptible surface (a wire protocol, a background store, a headless service, a data migration). Every ticket is still built and independently validated for function, performance, and requirements regardless — the flag only decides whether, after validation passes, the ticket waits for the human's Test step (`true`) or integrates straight to DONE (`false`). For a `true` ticket also set `--landing-url` so the board's Test button knows where to drop the user; a `false` ticket needs neither that nor a `--testing` state for the human (the validator's own harness is enough).
 
 `--links` MUST include every `knowledge/technical/research/<tech>.md` the plan relied on for this ticket's stack — the planner's research (exact APIs, parameter shapes, gotchas, official-doc links) is part of the briefing, and the builder reads those files instead of re-researching.
 

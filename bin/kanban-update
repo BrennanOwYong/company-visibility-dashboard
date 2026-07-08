@@ -32,36 +32,45 @@ fi
 
 PREV_STATUS=$(grep "^status:" "$KANBAN_FILE" | awk '{print $2}')
 
-# Deterministic gate (error-to-rule, from validation run 2026-07-04): a NEEDS_TESTING ticket
-# with a blank test_command is untestable by a stranger — the validator caught this once with
-# LLM effort; this check catches it forever for free. The builder must set test_command first.
+# Unified NEEDS_TESTING gate. EVERY ticket is built and independently validated (function,
+# performance, requirements) — the builder requests this transition once its validator passes.
+# The only branch is needs_user_test: a user-test ticket parks here for the human's Test step;
+# a non-user-test ticket has nothing for a human to judge, so it integrates straight to DONE.
 if [ "$STATUS" = "NEEDS_TESTING" ]; then
-  TC=$(grep "^test_command:" "$KANBAN_FILE" | head -1 | sed 's/^test_command:[[:space:]]*//')
-  if [ -z "$TC" ]; then
-    echo "[$ISSUE] REFUSED NEEDS_TESTING: test_command is blank in $KANBAN_FILE frontmatter."
-    echo "Set it to the command/URL that brings up this feature's test state, then retry."
-    exit 1
-  fi
+  # Common gates (all tickets):
   if grep -q "(builder fills this in" "$KANBAN_FILE"; then
-    echo "[$ISSUE] REFUSED NEEDS_TESTING: completion sections in $KANBAN_FILE still hold placeholders."
-    echo "Fill What was built / How it works / Tests run / Lessons learned IN THIS FILE (HANDOFF.md is a read-only briefing copy), then retry."
+    echo "[$ISSUE] REFUSED: completion sections in $KANBAN_FILE still hold placeholders."
+    echo "Fill What was built / How it works / Tests run / Lessons learned IN THIS FILE, then retry."
     exit 1
   fi
   TREPO=$(grep -m1 "^repo:" "$KANBAN_FILE" | sed 's/^repo:[[:space:]]*//')
   TREPO="${TREPO:-$PROJECT_ROOT}"
   WT=$(git -C "$TREPO" worktree list --porcelain 2>/dev/null | awk '/^worktree /{p=$2} /^branch .*feat\/'"$ISSUE"'$/{print p}' | head -1)
   if [ -n "$WT" ] && [ -n "$(git -C "$WT" status --porcelain 2>/dev/null)" ]; then
-    echo "[$ISSUE] REFUSED NEEDS_TESTING: uncommitted/untracked changes in worktree $WT."
-    echo "Commit your work on feat/$ISSUE first — an unmerged, uncommitted build can be lost when the worktree is pruned."
+    echo "[$ISSUE] REFUSED: uncommitted/untracked changes in worktree $WT. Commit on feat/$ISSUE first."
     exit 1
   fi
-  # Shift-left: NEEDS_TESTING means ONLY taste remains, so independent validation must have
-  # passed while the ticket was still IN_PROGRESS.
   VFILE="$PROJECT_ROOT/kanban/validation/$ISSUE.md"
   if ! grep -qE '^verdict: pass' "$VFILE" 2>/dev/null; then
-    echo "[$ISSUE] REFUSED NEEDS_TESTING: no passing validation verdict at $VFILE."
+    echo "[$ISSUE] REFUSED: no passing validation verdict at $VFILE."
     echo "Spawn the validator while IN_PROGRESS (spawn-agent validator-agent \"VALIDATE: $ISSUE — ...\"), iterate on its VALIDATION-FAILED feedback, retry when it passes."
     exit 1
+  fi
+  # Branch on whether the roadmap tagged this ticket as needing a human test. Default true:
+  # an untagged ticket gets the safe path (tested) rather than silently auto-closing.
+  NUT=$(grep -m1 '^needs_user_test:' "$KANBAN_FILE" | awk '{print $2}'); [ -z "$NUT" ] && NUT=true
+  if [ "$NUT" = "true" ]; then
+    # A user-test ticket needs a test_command so the board's Test button can bring up its state.
+    TC=$(grep "^test_command:" "$KANBAN_FILE" | head -1 | sed 's/^test_command:[[:space:]]*//')
+    if [ -z "$TC" ]; then
+      echo "[$ISSUE] REFUSED: needs_user_test but test_command is blank. Set it to the command/URL that brings up the test state."
+      exit 1
+    fi
+  else
+    # No human test to run: validated work integrates straight to DONE (no Test button, no wait).
+    export KANBAN_PROJECT_ROOT="$PROJECT_ROOT"
+    echo "[$ISSUE] validated (function/performance/requirements); needs_user_test=false — integrating to DONE"
+    exec kanban-done "$ISSUE" "auto: validated; no user test required"
   fi
 fi
 
@@ -79,16 +88,13 @@ echo "[$ISSUE] $STATUS${NOTES:+ — $NOTES}"
 
 KANBAN_PROJECT_ROOT="$PROJECT_ROOT" factory-log task_update issue="$ISSUE" status="$STATUS" from="${PREV_STATUS:-NONE}"
 
-# The port is allocated when the validator boots (kanban-port, via spawn-agent's
-# VALIDATE path) — validation runs inside IN_PROGRESS, so by NEEDS_TESTING the ticket
-# normally holds one already. kanban-port is idempotent; this call only covers a
-# validator that was run outside spawn-agent.
+# Only user-test tickets reach NEEDS_TESTING (non-user-test exec'd into kanban-done above).
+# Allocate the serving port (idempotent — the validator boot usually already did) and notify the
+# coordinator that the human's Test step is ready. No card is generated: the board's Test button
+# is the setup surface now.
 if [ "$STATUS" = "NEEDS_TESTING" ]; then
   PORT=$(KANBAN_PROJECT_ROOT="$PROJECT_ROOT" kanban-port "$ISSUE")
-
-  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" kanban-generate-card "$ISSUE"
   COORDINATOR=$(cat ~/.claude/.coordinator 2>/dev/null)
-  CARD="$PROJECT_ROOT/kanban/user-test-cards/$ISSUE-card.md"
   [ -n "$COORDINATOR" ] && KANBAN_PROJECT_ROOT="$PROJECT_ROOT" tmux-delegate "$COORDINATOR" \
-    "[$ISSUE] NEEDS_TESTING (port $PORT) — user test card ready for review: $CARD"
+    "[$ISSUE] ready for user test (port $PORT) — open the board and press Test."
 fi
