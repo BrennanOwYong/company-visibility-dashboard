@@ -6,8 +6,10 @@
 # Verifies, against the real scripts:
 #   handoff-to-planner spawns the planner session + logs the handoff
 #   kanban-create writes tickets + logs ticket_created
-#   kanban-dispatch creates feat/<issue> worktrees/branches + logs branch_created/task_dispatched
+#   kanban-dispatch honors the ready-set (stub edge contract holds a dependent; a filled
+#     contract releases it), creates feat/<issue> worktrees/branches + logs events
 #   kanban-update logs task_update
+#   rebase-queue serial-integrates an approved branch onto main and writes the AAR
 # It does NOT test real agent reasoning — only that the system actions fire and are logged.
 set -u
 
@@ -33,6 +35,10 @@ git config user.email smoke@test.local; git config user.name smoke
 echo "smoke" > README.md; git add -A
 git commit -qm init 2>/dev/null || echo "  (note: git commit unavailable in this env; continuing — worktree add still works)"
 touch factory.json
+# Product code builds in its OWN repo (spawn-builder refuses the factory root as repo)
+mkdir -p product; git -C product init -q
+git -C product config user.email smoke@test.local; git -C product config user.name smoke
+echo product > product/README.md; git -C product add -A; git -C product commit -qm init 2>/dev/null
 mkdir -p knowledge/prd
 echo "# search feature (fake PRD for smoke test)" > knowledge/prd/search.md
 
@@ -42,14 +48,30 @@ export CLAUDE_BIN=true AGENT_BOOT_SECONDS=0 BUILDER_BOOT_SECONDS=0
 
 EVENTS="$PROJ/kanban/agent-events.jsonl"
 
-echo "1) PM hands off to the planner (handoff-to-planner)"
+echo "0) handoff gate refuses an incomplete PRD (prd-check)"
+pipeline-state set search feasibility_pending >/dev/null
+handoff-to-planner >/dev/null 2>&1; HRC=$?
+check "handoff refused (exit 1)"       '[ "$HRC" -eq 1 ]'
+check "no planner session spawned"     '! tmux has-session -t technical-planning-agent 2>/dev/null'
+check "handoff_refused logged"         'grep -q handoff_refused "$EVENTS"'
+
+echo "1) PM completes the artifacts, hands off (handoff-to-planner)"
+mkdir -p "$PROJ/knowledge/contracts/acceptance" "$PROJ/knowledge/technical/feasibility"
+printf '# product (fake single PRD)\n## search\nflow...\n## about\nflow...\n' > "$PROJ/knowledge/prd/product.md"
+echo "# acceptance: search (fake)"      > "$PROJ/knowledge/contracts/acceptance/search.md"
+echo "# acceptance: about (fake)"       > "$PROJ/knowledge/contracts/acceptance/about.md"
+echo "verdict: feasible (fake)"         > "$PROJ/knowledge/technical/feasibility/search.md"
+pipeline-state set search feasibility_ok >/dev/null
+pipeline-state set about feasibility_waived >/dev/null   # waived: no verdict file needed
 handoff-to-planner >/dev/null 2>&1
 check "planner session spawned"        'tmux has-session -t technical-planning-agent 2>/dev/null'
 check "handoff event logged"           'grep -q "\"event\": \"handoff\"" "$EVENTS"'
+check "checked feature handed_off"     '[ "$(pipeline-state get search)" = "handed_off" ]'
+check "waived feature handed_off"      '[ "$(pipeline-state get about)" = "handed_off" ]'
 
 echo "2) planner populates the kanban (kanban-create x2)"
-kanban-create iss-001-api --feature backend  --title "REST API" >/dev/null
-kanban-create iss-002-ui  --feature frontend --title "List UI" --depends-on iss-001-api >/dev/null
+kanban-create iss-001-api --feature backend  --title "REST API" --repo "$PROJ/product" >/dev/null
+kanban-create iss-002-ui  --feature frontend --title "List UI" --repo "$PROJ/product" --depends-on iss-001-api >/dev/null
 check "two tickets on the board"       '[ "$(ls "$PROJ"/kanban/*.md | wc -l)" -eq 2 ]'
 check "ticket_created logged twice"    '[ "$(grep -c ticket_created "$EVENTS")" -eq 2 ]'
 
@@ -57,16 +79,31 @@ echo "3) graph validates (kanban-graph)"
 kanban-graph >/dev/null 2>&1; GRC=$?
 check "kanban-graph exits clean"       '[ "$GRC" -eq 0 ]'
 
-echo "4) dispatch creates branches + spawns coding agents (kanban-dispatch)"
+echo "4) dispatch honors the ready-set: stub edge contract holds the dependent (kanban-dispatch)"
 kanban-dispatch >/dev/null 2>&1
-check "feat/iss-001-api worktree made" 'git -C "$PROJ" worktree list | grep -q "feat/iss-001-api"'
-check "feat/iss-002-ui worktree made"  'git -C "$PROJ" worktree list | grep -q "feat/iss-002-ui"'
-check "branch_created logged twice"    '[ "$(grep -c branch_created "$EVENTS")" -eq 2 ]'
+check "feat/iss-001-api worktree made (product repo)" 'git -C "$PROJ/product" worktree list | grep -q "feat/iss-001-api"'
+check "iss-002-ui held back (stub contract, dep not DONE)" '! git -C "$PROJ/product" worktree list | grep -q "feat/iss-002-ui"'
+check "branch_created logged once"     '[ "$(grep -c branch_created "$EVENTS")" -eq 1 ]'
+
+echo "4b) filling the edge contract makes the dependent ticket ready"
+printf '# Contract: iss-002-ui depends on iss-001-api\nGET /items -> 200 [{id, name}]\n' \
+  > "$PROJ/knowledge/contracts/iss-002-ui-iss-001-api.md"
+kanban-dispatch >/dev/null 2>&1
+check "feat/iss-002-ui worktree made"  'git -C "$PROJ/product" worktree list | grep -q "feat/iss-002-ui"'
 check "task_dispatched logged twice"   '[ "$(grep -c task_dispatched "$EVENTS")" -eq 2 ]'
 
 echo "5) a task reports an update (kanban-update)"
 kanban-update iss-001-api IN_PROGRESS "starting" >/dev/null 2>&1
 check "task_update logged"             'grep -q task_update "$EVENTS"'
+
+echo "6) approved ticket integrates serially (rebase-queue → main + AAR)"
+echo feature > "$PROJ/worktrees/iss-001-api/api.txt"
+git -C "$PROJ/worktrees/iss-001-api" add -A
+git -C "$PROJ/worktrees/iss-001-api" commit -qm "feat: api" 2>/dev/null
+rebase-queue iss-001-api >/dev/null 2>&1
+check "branch landed on product main"  'git -C "$PROJ/product" log --oneline 2>/dev/null | grep -q "feat: api"'
+check "AAR written after landing"      '[ -f "$PROJ/kanban/aar/iss-001-api-aar.md" ]'
+check "rebase lock released"           '[ ! -d "$PROJ/kanban/.rebase-lock" ]'
 
 echo ""
 echo "system-events stream:"

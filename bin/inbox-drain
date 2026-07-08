@@ -17,6 +17,16 @@ INBOX="$ROOT/kanban/inbox/$AGENT.jsonl"
 [ -s "$INBOX" ] || exit 0
 
 STATE=$(cat "$STATE_FILE" 2>/dev/null)
+
+# Self-heal an orphaned 'delivering': the marker is only meant to live for one ack window
+# (~2 min). If the drain that wrote it died mid-window (killed parent process, crashed
+# shell), the state wedges and every future drain backs off forever — the whole inbox
+# starves. A 'delivering' older than 5 minutes cannot be a live delivery; treat as idle.
+if [ "$STATE" = "delivering" ]; then
+  AGE=$(( $(date +%s) - $(stat -c %Y "$STATE_FILE" 2>/dev/null || echo 0) ))
+  [ "$AGE" -gt 300 ] && STATE="idle"
+fi
+
 [ "$STATE" = "idle" ] || exit 0
 
 tmux has-session -t "$AGENT" 2>/dev/null || exit 0
@@ -30,11 +40,44 @@ tail -n +2 "$INBOX" > "$INBOX.tmp" 2>/dev/null && mv "$INBOX.tmp" "$INBOX"
 MSG=$(printf '%s' "$MSG_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['msg'])" 2>/dev/null)
 [ -z "$MSG" ] && exit 0
 
-# Mark busy before delivery so a racing drain backs off
-printf 'busy\n' > "$STATE_FILE"
+# Mark 'delivering' so a racing drain backs off (only idle sessions receive). Only the
+# UserPromptSubmit hook writes 'busy', which makes the state transition itself the POSITIVE
+# submission ack — text-absence checks proved unreliable (a message swallowed by a booting
+# TUI looks identical to a submitted one).
+printf 'delivering\n' > "$STATE_FILE"
 
 # -l sends the text literally (no tmux key-name interpretation); Enter submits it
 tmux send-keys -t "$AGENT" -l -- "$MSG"
-sleep 0.4
+sleep 1
 tmux send-keys -t "$AGENT" Enter
-echo "[drain] delivered -> $AGENT"
+
+# Ack window must outlast the target's UserPromptSubmit hook chain (user-global sync hooks
+# run up to 90s BEFORE the busy write) — a short window here once requeued a message that had
+# in fact submitted, producing a duplicate turn and a premature idle.
+SNIPPET=$(printf '%s' "$MSG" | cut -c1-40)
+DELIVERED=0
+for _ in $(seq 1 30); do
+  sleep 4
+  STATE_NOW=$(cat "$STATE_FILE" 2>/dev/null)
+  if [ "$STATE_NOW" != "delivering" ]; then DELIVERED=1; break; fi   # hook fired: submitted
+  # Not yet submitted. If the text is visibly stranded in the input box, press Enter again
+  # (a no-op on an empty box, so always safe).
+  tmux capture-pane -pJ -t "$AGENT" -S -8 2>/dev/null | grep -qF "$SNIPPET" && tmux send-keys -t "$AGENT" Enter
+done
+
+if [ "$DELIVERED" = 1 ]; then
+  echo "[drain] delivered -> $AGENT"
+else
+  # State never left 'delivering' within the ack window. The in-loop Enter-retries above already
+  # re-submit any message genuinely stranded in the input box (a no-op on an empty box), so a true
+  # stranding self-heals inside the window. Reaching here means either the message is being
+  # processed behind a slow UserPromptSubmit hook chain (the 'busy' write lags a long turn) or it
+  # never typed at all. Pane-snippet matching CANNOT distinguish "being processed" from "stranded":
+  # the delivered prompt and the agent's own reply both echo the message text into the pane, so the
+  # grep false-matches on a long turn and requeues a message that did submit — an infinite
+  # redelivery loop that starved the whole queue. So do NOT requeue on a pane match. Assume
+  # submitted and hand off to the Stop hook. A message that truly failed to submit surfaces via the
+  # sender's timeout, which is the loud, correct failure mode.
+  printf 'busy\n' > "$STATE_FILE"
+  echo "[drain] ack window elapsed -> assuming submitted, marked $AGENT busy"
+fi

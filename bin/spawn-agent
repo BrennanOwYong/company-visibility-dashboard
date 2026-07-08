@@ -17,18 +17,56 @@ if [ -z "$AGENT" ]; then
   exit 1
 fi
 
+# The agent name becomes a tmux session and a claude --agent target — validate it.
+# (A builder once ran `spawn-agent --help`, which spawned a session literally named
+# "--help" running `claude --agent --help`.)
+case "$AGENT" in -*)
+  echo "Usage: spawn-agent <agent-name> [message]"
+  echo "Agents available: $(ls "$PROJECT_ROOT/.claude/agents/" 2>/dev/null | sed 's/\.md$//' | tr '\n' ' ')"
+  exit 1;;
+esac
+if [ ! -f "$PROJECT_ROOT/.claude/agents/$AGENT.md" ]; then
+  echo "Unknown agent '$AGENT' — no $PROJECT_ROOT/.claude/agents/$AGENT.md"
+  echo "Agents available: $(ls "$PROJECT_ROOT/.claude/agents/" 2>/dev/null | sed 's/\.md$//' | tr '\n' ' ')"
+  exit 1
+fi
+
 if ! tmux has-session -t "$AGENT" 2>/dev/null; then
+  # Research/Task subagents run Sonnet regardless of the user-level subagent-model
+  # setting (which would force a frontier model onto every fan-out).
   tmux new-session -d -s "$AGENT" -c "$PROJECT_ROOT" \
     -e "PATH=$PROJECT_ROOT/bin:$PATH" \
-    -e "KANBAN_PROJECT_ROOT=$PROJECT_ROOT"
+    -e "KANBAN_PROJECT_ROOT=$PROJECT_ROOT" \
+    -e "FACTORY_AGENT=$AGENT" \
+    -e "CLAUDE_CODE_SUBAGENT_MODEL=${FACTORY_SUBAGENT_MODEL:-sonnet}"
   # CLAUDE_BIN override exists for testing; defaults to the real CLI
   tmux send-keys -t "$AGENT" "${CLAUDE_BIN:-claude} --dangerously-skip-permissions --agent $AGENT" Enter
-  sleep "${AGENT_BOOT_SECONDS:-5}"
+  # The idle mark IS the delivery gate (inbox-drain only delivers to idle sessions), so it
+  # must wait for the TUI to actually be input-ready — a fixed sleep raced cold boots and let
+  # messages be typed into a half-started session, where they were silently swallowed.
+  BOOT_DEADLINE=$(( $(date +%s) + ${AGENT_BOOT_SECONDS:-90} ))
+  if [ "${CLAUDE_BIN:-claude}" = "claude" ]; then
+    until tmux capture-pane -pJ -t "$AGENT" -S -30 2>/dev/null | grep -qE "bypass permissions|shift\+tab|esc to interrupt"; do
+      sleep 2
+      [ "$(date +%s)" -ge "$BOOT_DEADLINE" ] && { echo "[spawn] WARNING: $AGENT TUI not ready after ${AGENT_BOOT_SECONDS:-90}s; marking idle anyway"; break; }
+    done
+  else
+    sleep 1   # stubbed CLI in tests: nothing to wait for
+  fi
   KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/agent-state" "$AGENT" idle
   KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/factory-log" agent_spawned agent="$AGENT"
 fi
 
 if [ -n "$MSG" ]; then
+  # Port-on-boot (shift-left): a VALIDATE kickoff is the moment the ticket's test port
+  # is allocated — validation runs inside IN_PROGRESS, so NEEDS_TESTING is too late and
+  # spawn-time would reserve it for an unknown duration. Builder and validator both read
+  # the port from the ticket frontmatter.
+  VISSUE=$(printf '%s' "$MSG" | sed -n 's/^VALIDATE:[[:space:]]*\([A-Za-z0-9_-]*\).*/\1/p')
+  if [ -n "$VISSUE" ] && [ -f "$PROJECT_ROOT/kanban/$VISSUE.md" ]; then
+    VPORT=$(KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/kanban-port" "$VISSUE") \
+      && echo "[$VISSUE] test port: $VPORT"
+  fi
   KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/tmux-delegate" "$AGENT" "$MSG"
 fi
 

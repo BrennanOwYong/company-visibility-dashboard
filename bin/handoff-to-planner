@@ -8,7 +8,20 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(pwd)}"
 
-MSG="${1:-The PRD is ready in knowledge/prd/ (and acceptance contracts in knowledge/contracts/acceptance/ if present). Produce the validated technical plan (per-feature plans, derived architecture, interface contracts), pass your self-hardening gate, then invoke the roadmap-and-branching skill to create the tickets and branches. Run autonomously; do not wait for the user.}"
+MSG="${1:-The PRD is ready in knowledge/prd/ (and acceptance contracts in knowledge/contracts/acceptance/ if present). Feasibility verdicts per feature are in knowledge/technical/feasibility/. Produce the validated technical plan (per-feature plans, derived architecture, interface contracts), pass your validation gate, then invoke the roadmap-and-branching skill to create the tickets and branches. Run autonomously; do not wait for the user.}"
+
+# Deterministic gate: refuse to hand off unless every required artifact exists.
+# prd-check verifies existence; content quality was the PM conversation's job.
+if ! KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/prd-check"; then
+  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/factory-log" handoff_refused from=prd-agent reason=prd-check-failed 2>/dev/null || true
+  echo "[handoff] REFUSED — fix the missing artifacts above, then run handoff-to-planner again."
+  exit 1
+fi
+
+while IFS= read -r line; do
+  FEATURE="${line%%:*}"
+  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/pipeline-state" set "$FEATURE" handed_off >/dev/null
+done < <(KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/pipeline-state" list)
 
 KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/factory-log" handoff from=prd-agent to=technical-planning-agent trigger=function
 KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/spawn-agent" technical-planning-agent "$MSG"

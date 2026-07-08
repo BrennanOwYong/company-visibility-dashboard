@@ -25,7 +25,7 @@ KANBAN_FILE="$KANBAN_ROOT/kanban/$MERGED_BRANCH.md"
 
 STATUS=$(grep "^status:" "$KANBAN_FILE" | awk '{print $2}')
 
-if [ "$STATUS" = "COMPLETE" ]; then
+if [ "$STATUS" = "DONE" ]; then
   CARD="$KANBAN_ROOT/kanban/user-test-cards/$MERGED_BRANCH-card.md"
   [ ! -f "$CARD" ] && KANBAN_PROJECT_ROOT="$KANBAN_ROOT" kanban-generate-card "$MERGED_BRANCH"
   KANBAN_PROJECT_ROOT="$KANBAN_ROOT" tmux-delegate "$COORDINATOR" \
@@ -34,3 +34,7 @@ else
   KANBAN_PROJECT_ROOT="$KANBAN_ROOT" tmux-delegate "$COORDINATOR" \
     "[$MERGED_BRANCH] merged. Status: $STATUS"
 fi
+
+# A landed branch can make coupled tickets ready (their dep is merged) — recompute the
+# ready-set and dispatch whatever became buildable. Idempotent; safe to fire every merge.
+KANBAN_PROJECT_ROOT="$KANBAN_ROOT" kanban-dispatch >/dev/null 2>&1 || true

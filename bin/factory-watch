@@ -1,0 +1,23 @@
+#!/bin/bash
+# factory-watch — live, human-readable feed of the factory's HIGH-LEVEL actions only
+# (handoffs, dispatches, tickets, status moves, validation verdicts — no LLM internals).
+ROOT="${KANBAN_PROJECT_ROOT:-$(cat "$HOME/.claude/.coordinator-root" 2>/dev/null || pwd)}"
+tail -n 50 -f "$ROOT/kanban/agent-events.jsonl" 2>/dev/null | python3 -u -c '
+import json,sys
+for line in sys.stdin:
+    try: e=json.loads(line)
+    except: continue
+    t=e.get("event",""); iso=e.get("iso","")[-8:]
+    if   t=="delegate":          m=f"MSG    {e.get(\"to\",\"?\"):<24} <- {e.get(\"msg\",\"\")[:100]}"
+    elif t=="agent_spawned":     m=f"SPAWN  {e.get(\"agent\",\"\")}"
+    elif t=="handoff":           m=f"HANDOFF {e.get(\"from\")} -> {e.get(\"to\")}"
+    elif t=="handoff_refused":   m=f"GATE   handoff REFUSED ({e.get(\"reason\",\"\")})"
+    elif t=="pipeline_stage":    m=f"STAGE  {e.get(\"feature\",\"\")}: {e.get(\"stage\",\"\")}"
+    elif t=="ticket_created":    m=f"TICKET {e.get(\"issue\",\"\")} ({e.get(\"feature\",\"\")}) deps=[{e.get(\"dependsOn\",\"\")}]"
+    elif t=="branch_created":    m=f"BRANCH {e.get(\"branch\",\"\")}"
+    elif t=="task_dispatched":   m=f"BUILD  {e.get(\"issue\",\"\")} dispatched"
+    elif t=="task_update":       m=f"STATUS {e.get(\"issue\",\"\")}: {e.get(\"from\",\"\")} -> {e.get(\"status\",\"\")}"
+    elif t=="validation_verdict":m=f"VERDICT {e.get(\"issue\",\"\")}: {e.get(\"verdict\",\"\").upper()}"
+    else:                        m=f"{t.upper():<7}{json.dumps({k:v for k,v in e.items() if k not in (\"ts\",\"iso\",\"event\")})[:90]}"
+    print(f"{iso}  {m}", flush=True)
+'

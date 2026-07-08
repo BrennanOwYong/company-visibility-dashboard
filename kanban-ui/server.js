@@ -106,14 +106,19 @@ function readTickets() {
       const fm = parseFrontmatter(text);
       const id = fm.issue || path.basename(f, '.md');
       const cardPath = path.join(KANBAN_DIR, 'user-test-cards', `${id}-card.md`);
+      // Completion sections hold "(builder fills this in)" until the builder writes them —
+      // a placeholder is not content.
+      const rawBuilt = parseSection(text, 'What was built');
       return {
         issue: id,
         feature: fm.feature || '',
+        title: fm.title || '',
         status: fm.status || 'NOT_STARTED',
         port: fm.port || '',
         test_command: fm.test_command || '',
         dependsOn: fm.dependsOn || '',
-        whatBuilt: parseSection(text, 'What was built'),
+        intent: parseSection(text, 'Intent'),
+        whatBuilt: /\(builder fills/.test(rawBuilt) ? '' : rawBuilt,
         tests: (text.match(/^- \[x\].*$/gm) || []),
         lastUpdate: (text.match(/^### .+$/gm) || []).slice(-1)[0] || '',
         testCard: fs.existsSync(cardPath) ? parseTestCard(fs.readFileSync(cardPath, 'utf8')) : null,
@@ -220,7 +225,12 @@ function renderTestCardBlock(card, test_command, feature, issue, context) {
 
 function renderTicketCard(t, context, allTickets) {
   const featureHref = t.feature ? `/prd#${esc(t.feature)}` : '/prd';
-  const built = t.whatBuilt ? `<p class="what-built">${esc(t.whatBuilt)}</p>` : '';
+  const title = t.title ? `<p class="ticket-title">${esc(t.title)}</p>` : '';
+  // Before completion, the brief's Intent is the ticket's description; once the builder
+  // writes What-was-built, that takes over.
+  const desc = t.whatBuilt
+    ? `<p class="what-built">${esc(t.whatBuilt)}</p>`
+    : (t.intent ? `<p class="what-built ticket-intent">${esc(t.intent)}</p>` : '');
   const last = t.lastUpdate
     ? `<div class="last">${esc(t.lastUpdate.replace(/^### /, ''))}</div>` : '';
 
@@ -229,7 +239,8 @@ function renderTicketCard(t, context, allTickets) {
       <span class="issue">${esc(t.issue)}</span>
       <a class="feature-badge" href="${featureHref}">${esc(t.feature || '—')}</a>
     </div>
-    ${built}
+    ${title}
+    ${desc}
     ${renderDeps(t.dependsOn, allTickets)}
     ${last}
     ${renderTestCardBlock(t.testCard, t.test_command, t.feature, t.issue, context)}
@@ -245,9 +256,9 @@ function renderPage(tickets) {
   const inProgress   = tickets.filter(t => t.status === 'IN_PROGRESS');
   const blocked      = tickets.filter(t => t.status === 'NEEDS_SETUP');
   const needsReview  = tickets.filter(t => t.status === 'NEEDS_TESTING');
-  const complete     = tickets.filter(t => t.status === 'COMPLETE');
+  const complete     = tickets.filter(t => t.status === 'DONE' || t.status === 'COMPLETE');
   // Anything else → in-progress
-  const unknown      = tickets.filter(t => !['NOT_STARTED','IN_PROGRESS','NEEDS_SETUP','NEEDS_TESTING','COMPLETE'].includes(t.status));
+  const unknown      = tickets.filter(t => !['NOT_STARTED','IN_PROGRESS','NEEDS_SETUP','NEEDS_TESTING','DONE','COMPLETE'].includes(t.status));
 
   const allInProgress = [...inProgress, ...unknown];
 
@@ -315,6 +326,24 @@ function renderPage(tickets) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Kanban — ${esc(projectName)}</title>
+<script>
+// Live board: poll a lightweight revision token every 5s and reload ONLY when a ticket
+// file actually changed — a static board never reloads. Skips the reload while the user
+// is mid-interaction (feedback form open or text selected) so it can't eat input.
+let __rev = null;
+setInterval(async () => {
+  try {
+    const r = await fetch('/rev', {cache: 'no-store'});
+    const { rev } = await r.json();
+    if (__rev === null) { __rev = rev; return; }
+    if (rev === __rev) return;
+    const busy = document.querySelector('.feedback-form[style*="block"] textarea, .fb-input:focus') || String(getSelection()).length;
+    if (busy) return;            // defer until the user is done; token stays stale, reload next tick
+    __rev = rev;
+    location.reload();
+  } catch (e) { /* server momentarily down — try again next tick */ }
+}, 5000);
+</script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#e2e8f0;min-height:100vh;font-size:14px}
@@ -349,6 +378,8 @@ header h1{font-size:19px;font-weight:700;color:#f1f5f9}
 .feature-badge{background:#1e293b;border:1px solid #2d3748;color:#7c9eb5;font-size:11px;padding:3px 9px;border-radius:4px;text-decoration:none}
 .feature-badge:hover{background:#1e3a5f;border-color:#3d5a80;color:#93c5fd}
 .what-built{font-size:13px;color:#94a3b8;line-height:1.6;margin-bottom:10px}
+.ticket-title{font-size:13px;font-weight:600;color:#e2e8f0;line-height:1.5;margin-bottom:6px}
+.ticket-intent{color:#7c8ba1;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 .deps{font-size:12px;color:#64748b;margin-bottom:8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center}
 .dep-badge{display:inline-block;background:#1a1f2e;border:1px solid #2d3748;color:#7c9eb5;font-size:11px;padding:3px 8px;border-radius:4px;text-decoration:none}
 .dep-badge:hover{background:#1e293b;border-color:#3d5a80;color:#93c5fd}
@@ -529,8 +560,32 @@ function parsePrdFeatures(text) {
 
 const FEATURE_ACCENTS = ['#6d28d9','#0891b2','#059669','#b45309','#be185d','#7c3aed'];
 
+// The single living PRD (knowledge/prd/product.md): one `## <slug>` section per feature
+// with **Why:** / **Goal:** / **User flow (numbered):** blocks. Non-feature sections
+// (Problem & users, Feature index, ledgers) are prose headings with spaces — skipped.
+function parseProductPrd(text, issuesByFeature) {
+  const features = [];
+  for (const sec of text.split(/\n## /).slice(1)) {
+    const nl = sec.indexOf('\n');
+    const name = sec.slice(0, nl === -1 ? sec.length : nl).trim();
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) continue;
+    const body = nl === -1 ? '' : sec.slice(nl + 1);
+    const grab = (label) => ((body.match(new RegExp(`\\*\\*${label}[^*]*\\*\\*:?\\s*\\n?([\\s\\S]*?)(?=\\n\\s*\\n|\\n\\*\\*|\\n\`\`\`|$)`)) || [])[1] || '').trim();
+    const desc = [grab('Why:'), grab('Goal:')].filter(Boolean).join(' ').replace(/\*\*/g, '');
+    const flowBlock = ((body.match(/\*\*User flow[^*]*\*\*:?\s*\n([\s\S]*?)(?=\n```|\n\*\*|$)/) || [])[1] || '');
+    const flow = flowBlock.split('\n').map(l => l.trim())
+      .filter(l => /^\d+\./.test(l)).map(l => l.replace(/^\d+\.\s*/, '').replace(/\*\*/g, '').replace(/\*/g, ''));
+    const edgesBlock = ((body.match(/\*\*Edge cases[^*]*\*\*:?\s*\n([\s\S]*?)(?=\n```|\n\*\*|$)/) || [])[1] || '');
+    const edges = edgesBlock.split('\n').map(l => l.trim())
+      .filter(l => l.startsWith('-')).map(l => l.replace(/^-\s*/, ''));
+    features.push({ name, desc, flow, edges, issues: issuesByFeature[name] || [] });
+  }
+  return features;
+}
+
 function renderPrdPage() {
-  const prdPath = path.join(KNOWLEDGE_DIR, 'user-flow.md');
+  const productPath = path.join(KNOWLEDGE_DIR, 'prd', 'product.md');
+  const prdPath = path.join(KNOWLEDGE_DIR, 'user-flow.md');   // legacy coordinator flow
   const projectName = path.basename(PROJECT_ROOT);
 
   const noDataPage = (msg) => `<!DOCTYPE html>
@@ -544,17 +599,28 @@ code{background:#161b27;border:1px solid #1e2433;padding:2px 6px;border-radius:3
 <header><a class="back" href="/">← Board</a></header>
 <div class="msg">${msg}</div></body></html>`;
 
-  if (!fs.existsSync(prdPath)) {
-    return noDataPage(`No PRD found at <code>knowledge/user-flow.md</code>. The coordinator writes this during the spec phase.`);
+  let title, intro, features;
+  if (fs.existsSync(productPath)) {
+    const raw = fs.readFileSync(productPath, 'utf8');
+    title = (raw.match(/^# (.+)$/m) || [null, projectName])[1].trim();
+    intro = ((raw.match(/## Problem & users\n([\s\S]*?)(?=\n## )/) || [null, ''])[1] || '').trim();
+    const issuesByFeature = {};
+    for (const t of readTickets()) {
+      if (t.feature) (issuesByFeature[t.feature] = issuesByFeature[t.feature] || []).push(t.issue);
+    }
+    features = parseProductPrd(raw, issuesByFeature);
+    if (!features.length) return noDataPage('product.md exists but has no feature sections (expected <code>## feature-slug</code> headings).');
+  } else if (fs.existsSync(prdPath)) {
+    const raw = fs.readFileSync(prdPath, 'utf8');
+    const titleMatch = raw.match(/^# (.+)$/m);
+    title = titleMatch ? titleMatch[1].trim() : projectName;
+    const introMatch = raw.match(/^# .+\n+([\s\S]*?)(?=\n###|$)/);
+    intro = introMatch ? introMatch[1].trim() : '';
+    features = parsePrdFeatures(raw);
+    if (!features.length) return noDataPage('PRD exists but contains no feature sections (expected <code>### feature-name</code> headings).');
+  } else {
+    return noDataPage(`No PRD found at <code>knowledge/prd/product.md</code>. The PM (prd-agent) writes it during requirements capture.`);
   }
-
-  const raw = fs.readFileSync(prdPath, 'utf8');
-  const titleMatch = raw.match(/^# (.+)$/m);
-  const title = titleMatch ? titleMatch[1].trim() : projectName;
-  const introMatch = raw.match(/^# .+\n+([\s\S]*?)(?=\n###|$)/);
-  const intro = introMatch ? introMatch[1].trim() : '';
-  const features = parsePrdFeatures(raw);
-  if (!features.length) return noDataPage('PRD exists but contains no feature sections (expected <code>### feature-name</code> headings).');
 
   const featureCards = features.map((f, i) => {
     const accent = FEATURE_ACCENTS[i % FEATURE_ACCENTS.length];
@@ -656,6 +722,29 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/prd') {
     res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
     res.end(renderPrdPage());
+    return;
+  }
+
+  // Revision token: max mtime across ticket files + card dir. The board polls this and
+  // reloads only when it changes, so a static board never reloads.
+  if (req.method === 'GET' && req.url === '/rev') {
+    let rev = 0;
+    try {
+      for (const f of fs.readdirSync(KANBAN_DIR)) {
+        if (!f.endsWith('.md')) continue;
+        const m = fs.statSync(path.join(KANBAN_DIR, f)).mtimeMs;
+        if (m > rev) rev = m;
+      }
+      const cardDir = path.join(KANBAN_DIR, 'user-test-cards');
+      if (fs.existsSync(cardDir)) {
+        for (const f of fs.readdirSync(cardDir)) {
+          const m = fs.statSync(path.join(cardDir, f)).mtimeMs;
+          if (m > rev) rev = m;
+        }
+      }
+    } catch (e) { /* fall through with whatever rev we have */ }
+    res.writeHead(200, {'Content-Type': 'application/json', 'Cache-Control': 'no-store'});
+    res.end(JSON.stringify({ rev: Math.round(rev) }));
     return;
   }
 

@@ -1,0 +1,37 @@
+#!/bin/bash
+# kanban-port <issue> — allocate the ticket's test port on demand.
+#
+# A kanban PRIMITIVE. Called from the validator spawn path (spawn-agent): a port is a
+# testing-phase resource, picked the moment the validator boots — validation runs inside
+# IN_PROGRESS (shift-left), so waiting until NEEDS_TESTING would be too late and
+# allocating at spawn would reserve it for an unknown duration. Idempotent: a ticket
+# that already holds a port keeps it. Prints the port either way.
+set -e
+
+ISSUE="$1"
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(cat "$HOME/.claude/.coordinator-root" 2>/dev/null || pwd)}"
+KANBAN_FILE="$PROJECT_ROOT/kanban/$ISSUE.md"
+
+if [ -z "$ISSUE" ]; then
+  echo "Usage: kanban-port <issue>"
+  exit 1
+fi
+if [ ! -f "$KANBAN_FILE" ]; then
+  echo "No kanban entry: $KANBAN_FILE"
+  exit 1
+fi
+
+CURRENT=$(grep -m1 "^port:" "$KANBAN_FILE" | awk '{print $2}')
+if [ -n "$CURRENT" ]; then
+  echo "$CURRENT"
+  exit 0
+fi
+
+# First free port from 3001 upward, skipping ports held by other tickets.
+USED=$(grep -h "^port:" "$PROJECT_ROOT/kanban/"*.md 2>/dev/null | awk '{print $2}' | grep -E '^[0-9]+$' | sort -un)
+PORT=3001
+while echo "$USED" | grep -qx "$PORT"; do PORT=$((PORT+1)); done
+sed -i "s/^port:.*/port: $PORT/" "$KANBAN_FILE"
+
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$(cd "$(dirname "$0")" && pwd)/factory-log" port_assigned issue="$ISSUE" port="$PORT" 2>/dev/null || true
+echo "$PORT"

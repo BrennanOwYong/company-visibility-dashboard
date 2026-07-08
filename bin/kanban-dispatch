@@ -7,8 +7,9 @@
 # already set has been dispatched and is skipped, so this is safe to re-run as the
 # architect adds issues.
 #
-# A port is NOT assigned here (testing-phase resource — set at NEEDS_TESTING). The board
-# view is kanban-check; tmux liveness is deliberately not mapped to state (KIV 7).
+# A port is NOT assigned here (testing-phase resource — allocated when the validator
+# boots). The board view is kanban-check; tmux liveness is deliberately not mapped to
+# state (KIV 7).
 # Note: the standalone kickoff trigger and pluggable tracker backend are KIV 8 — this
 # script is the local-markdown dispatcher.
 #
@@ -40,6 +41,55 @@ fm() { grep "^$2:" "$1" | head -1 | sed "s/^$2:[[:space:]]*//"; }
 DISPATCHED=0; SKIPPED=0
 DISPATCH_LOG="$KANBAN_DIR/dispatch-log.jsonl"
 
+# Concurrency: one builder per independent branch that is ready NOW. The DAG ready-set is
+# the governor; MAX_BUILDERS is only a rate-limit ceiling (frontier sessions freeze at a
+# usage-limit modal when too many run at once). A dependency edge is satisfied when the
+# dep ticket is DONE (merged), or when the edge contract
+# knowledge/contracts/<issue>-<dep>.md is FILLED — a filled contract means the seam is
+# contract-covered and the dependent builds against a mock now. An unfilled stub means
+# the seam is coupled: the ticket waits for its dependency to merge (coupled tickets stay
+# serial; independent branches scale out). Each dispatch pass recomputes the ready-set;
+# the post-merge hook re-runs dispatch as branches land, picking up newly ready tickets.
+MAX_BUILDERS="${MAX_BUILDERS:-8}"
+active_builders() {   # live builder sessions still working: just-spawned (NOT_STARTED) or IN_PROGRESS
+  # A spawned builder occupies a slot from the moment its session exists — counting only
+  # IN_PROGRESS let the loop overspawn past the ceiling during the boot window before a
+  # builder's first kanban-update.
+  local n=0 f s
+  for f in "$KANBAN_DIR"/*.md; do
+    [ -f "$f" ] || continue
+    case "$(basename "$f" .md)" in *-card|*-aar) continue;; esac
+    s=$(grep -m1 '^status:' "$f" | awk '{print $2}')
+    case "$s" in NOT_STARTED|IN_PROGRESS)
+      tmux has-session -t "$(basename "$f" .md)" 2>/dev/null && n=$((n+1));;
+    esac
+  done
+  echo "$n"
+}
+
+edge_satisfied() {   # edge_satisfied <issue> <dep> — dep DONE, or edge contract filled (mockable)
+  local dep_file="$KANBAN_DIR/$2.md" contract="$PROJECT_ROOT/knowledge/contracts/$1-$2.md"
+  if [ ! -f "$dep_file" ]; then
+    echo "  ⚠ $1 — dependency '$2' has no ticket (dangling; kanban-graph flags it) — not blocking on it" >&2
+    return 0
+  fi
+  [ "$(grep -m1 '^status:' "$dep_file" | awk '{print $2}')" = "DONE" ] && return 0
+  if [ -f "$contract" ] && ! grep -q 'Fill in the exact shape' "$contract"; then
+    return 0
+  fi
+  return 1
+}
+
+issue_ready() {      # issue_ready <issue> <dependsOn-csv> — every edge satisfied
+  local dep
+  IFS=',' read -ra _DEPS <<< "$2"
+  for dep in "${_DEPS[@]}"; do
+    dep="$(echo "$dep" | xargs)"; [ -z "$dep" ] && continue
+    edge_satisfied "$1" "$dep" || { echo "$dep"; return 1; }
+  done
+  return 0
+}
+
 for KFILE in "$KANBAN_DIR"/*.md; do
   [ -f "$KFILE" ] || continue
   base=$(basename "$KFILE" .md)
@@ -57,6 +107,21 @@ for KFILE in "$KANBAN_DIR"/*.md; do
   FEATURE=$(fm "$KFILE" feature)
   DEPS=$(fm "$KFILE" dependsOn)
   REPO=$(fm "$KFILE" repo)
+
+  # Ready-set gate: every dependency edge must be DONE or contract-covered (see header).
+  if [ -n "$DEPS" ]; then
+    BLOCKER=$(issue_ready "$ISSUE" "$DEPS") || {
+      echo "  • $ISSUE — waiting on '$BLOCKER' (edge contract unfilled and dep not DONE) — next pass"
+      SKIPPED=$((SKIPPED+1)); continue
+    }
+  fi
+
+  # Rate-limit ceiling. No waiting loop: whatever doesn't fit this pass is picked up by
+  # the next kanban-dispatch (the post-merge hook re-runs it as branches land).
+  if [ "$MODE" != "dryrun" ] && [ "$(active_builders)" -ge "$MAX_BUILDERS" ]; then
+    echo "  • $ISSUE — ready, but MAX_BUILDERS=$MAX_BUILDERS ceiling reached — next pass"
+    SKIPPED=$((SKIPPED+1)); continue
+  fi
 
   ARGS=("$ISSUE" "$KFILE" --feature "${FEATURE:-$ISSUE}")
   [ -n "$DEPS" ] && ARGS+=(--depends-on "$DEPS")

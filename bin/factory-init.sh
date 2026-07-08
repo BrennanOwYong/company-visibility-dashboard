@@ -1,10 +1,18 @@
 #!/bin/bash
 # factory-init.sh — runs on every SessionStart hook
-# Always bootstraps factory coordinator mode. Every session is a new project.
+# Bootstraps factory coordinator mode for a HUMAN-DRIVEN session. Spawned agent sessions
+# skip it: a builder booting in its worktree must not scaffold factory files there (they
+# would dirty the product repo), and neither builders nor planning agents may overwrite
+# the coordinator sentinels — every ping would route to the last-booted agent.
 
 PROJECT_ROOT="$(pwd)"
 
-if [ ! -f "$PROJECT_ROOT/factory.json" ]; then
+if [ -n "$BUILDER_ISSUE" ]; then
+  echo "FACTORY ACTIVE | builder session: $BUILDER_ISSUE (init skipped — worktree stays clean)"
+  exit 0
+fi
+
+if [ -z "$FACTORY_AGENT" ] && [ ! -f "$PROJECT_ROOT/factory.json" ]; then
   printf '{"project":"%s","repos":{}}\n' "$(basename "$PROJECT_ROOT")" > "$PROJECT_ROOT/factory.json"
 fi
 
@@ -55,13 +63,16 @@ node -e '
   fs.writeFileSync(f, JSON.stringify(s,null,2));
 ' "$SCRIPT_DIR" 2>/dev/null || true
 
-# Write coordinator sentinel (tmux session name or fallback)
-SESSION=$(tmux display-message -p '#S' 2>/dev/null || echo "main")
-echo "$SESSION" > ~/.claude/.coordinator
-echo "$PROJECT_ROOT" > ~/.claude/.coordinator-root
+# Write coordinator sentinel (tmux session name or fallback). Spawned agents never do —
+# the coordinator is the human-driven session, and the sentinel must keep naming it.
+if [ -z "$FACTORY_AGENT" ]; then
+  SESSION=$(tmux display-message -p '#S' 2>/dev/null || echo "main")
+  echo "$SESSION" > ~/.claude/.coordinator
+  echo "$PROJECT_ROOT" > ~/.claude/.coordinator-root
 
-# Seed the coordinator's own readiness so builder pings can reach it
-KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/agent-state" "$SESSION" idle
+  # Seed the coordinator's own readiness so builder pings can reach it
+  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/agent-state" "$SESSION" idle
+fi
 
 # Core directories
 mkdir -p "$PROJECT_ROOT/kanban/user-test-cards"

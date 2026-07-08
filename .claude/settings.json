@@ -1,5 +1,20 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Grep|Glob|Bash|Edit|Write|Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c '[ -f bin/hook-guard-technical ] || exit 0; exec bash bin/hook-guard-technical'"
+          },
+          {
+            "type": "command",
+            "command": "bash -c '[ -f bin/hook-guard-ticket ] || exit 0; exec bash bin/hook-guard-ticket'"
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [

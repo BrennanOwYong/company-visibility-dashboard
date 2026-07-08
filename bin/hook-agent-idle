@@ -5,10 +5,33 @@
 ROOT=$(cat "$HOME/.claude/.coordinator-root" 2>/dev/null)
 [ -z "$ROOT" ] && exit 0
 
+# Only act from INSIDE a tmux client: outside one, `tmux display-message -p '#S'` does not
+# fail — it asks the tmux server and returns some live session's name, which made sessions
+# running outside tmux (the coordinator) stamp busy/idle onto agent state files and drain
+# agent inboxes on their own turn boundaries.
+[ -z "$TMUX" ] && exit 0
+
 SESSION=$(tmux display-message -p '#S' 2>/dev/null)
 [ -z "$SESSION" ] && exit 0
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Capture guard (PM only): a prd-agent turn may not end without having written the single PRD.
+# Prompt-level "capture by default" proved non-deterministic across runs; the Stop hook owns
+# the turn boundary, so it enforces the rule mechanically. Turn start = the state file's busy
+# write (UserPromptSubmit hook); doc older than that = no write this turn -> block the stop,
+# feed the reason back, and crucially do NOT mark idle or drain, so no message can land
+# mid-continuation.
+HOOK_INPUT=$(cat 2>/dev/null)
+if [ "$SESSION" = "prd-agent" ] && ! printf '%s' "$HOOK_INPUT" | grep -q '"stop_hook_active": *true'; then
+  DOC="$ROOT/knowledge/prd/product.md"
+  STATE="$ROOT/kanban/agents/prd-agent.state"
+  if [ ! -s "$DOC" ] || { [ -f "$STATE" ] && [ "$DOC" -ot "$STATE" ]; }; then
+    printf '{"decision":"block","reason":"Capture-by-default: knowledge/prd/product.md was not updated during this turn. Every user message is product information — write it into the doc (create the file on your first turn: Problem & users, everything the message contained, Open questions), THEN finish your reply."}\n'
+    exit 0
+  fi
+fi
+
 KANBAN_PROJECT_ROOT="$ROOT" "$DIR/agent-state" "$SESSION" idle
 KANBAN_PROJECT_ROOT="$ROOT" "$DIR/inbox-drain" "$SESSION"
 exit 0

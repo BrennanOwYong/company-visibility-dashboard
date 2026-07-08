@@ -1,0 +1,105 @@
+#!/bin/bash
+# rebase-queue <issue>
+# Serial integration point: rebases feat/<issue> onto main and fast-forwards main, ONE
+# branch at a time. Parallel builders finish in any order; the lock forces their merges
+# into a serial queue so no two rebases fight over main. Run by the builder after user
+# approval (kanban-done delegates it).
+#
+# Flow: acquire lock → open PR (best-effort, only if a GitHub remote exists) → rebase
+# feat/<issue> onto main in the issue worktree → ff-merge into main → release lock →
+# write the AAR (kanban-aar) → print the self-mining instruction.
+# The repo's post-merge hook fires on the merge: it pings the coordinator and re-runs
+# kanban-dispatch, so coupled tickets waiting on this branch dispatch automatically.
+set -e
+
+ISSUE="$1"
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(cat "$HOME/.claude/.coordinator-root" 2>/dev/null || pwd)}"
+KANBAN_FILE="$PROJECT_ROOT/kanban/$ISSUE.md"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+if [ -z "$ISSUE" ]; then
+  echo "Usage: rebase-queue <issue>"
+  exit 1
+fi
+if [ ! -f "$KANBAN_FILE" ]; then
+  echo "No kanban entry: $KANBAN_FILE"
+  exit 1
+fi
+
+fm() { grep -m1 "^$1:" "$KANBAN_FILE" | sed "s/^$1:[[:space:]]*//"; }
+REPO=$(fm repo); REPO="${REPO:-$PROJECT_ROOT}"
+WORKTREE=$(fm worktree)
+BRANCH="feat/$ISSUE"
+
+if [ -z "$WORKTREE" ] || [ ! -d "$WORKTREE" ]; then
+  echo "[$ISSUE] no worktree on record ($WORKTREE) — cannot rebase"
+  exit 1
+fi
+if [ -n "$(git -C "$WORKTREE" status --porcelain 2>/dev/null)" ]; then
+  echo "[$ISSUE] REFUSED: uncommitted changes in $WORKTREE — commit on $BRANCH first"
+  exit 1
+fi
+
+MAIN=$(git -C "$REPO" symbolic-ref --short HEAD 2>/dev/null || echo main)
+
+# ---- serial lock (mkdir is atomic). One rebase-onto-main at a time. ----
+LOCK="$PROJECT_ROOT/kanban/.rebase-lock"
+WAITED=0
+until mkdir "$LOCK" 2>/dev/null; do
+  HOLDER=$(cat "$LOCK/holder" 2>/dev/null || echo unknown)
+  [ "$WAITED" -eq 0 ] && echo "[$ISSUE] rebase queue busy (held by $HOLDER) — waiting"
+  [ "$WAITED" -ge 1800 ] && { echo "[$ISSUE] queue wait exceeded 30m (holder: $HOLDER) — giving up; re-run rebase-queue $ISSUE"; exit 1; }
+  sleep 5; WAITED=$((WAITED+5))
+done
+echo "$ISSUE" > "$LOCK/holder"
+trap 'rm -rf "$LOCK"' EXIT
+echo "[$ISSUE] rebase lock acquired"
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/factory-log" rebase_started issue="$ISSUE" branch="$BRANCH" 2>/dev/null || true
+
+# ---- PR (best-effort; local-only repos have no remote) ----
+if git -C "$REPO" remote get-url origin >/dev/null 2>&1 && command -v gh >/dev/null 2>&1; then
+  git -C "$WORKTREE" push -u origin "$BRANCH" 2>/dev/null || true
+  gh pr create --repo "$(git -C "$REPO" remote get-url origin)" \
+    --head "$BRANCH" --base "$MAIN" \
+    --title "$ISSUE: $(fm title)" \
+    --body "$(printf 'Ticket: kanban/%s.md\nValidation: kanban/validation/%s.md\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)' "$ISSUE" "$ISSUE")" \
+    2>/dev/null && echo "[$ISSUE] PR opened" || echo "[$ISSUE] PR skipped (exists already or gh failed)"
+else
+  echo "[$ISSUE] no GitHub remote — skipping PR, integrating locally"
+fi
+
+# ---- rebase onto main, then fast-forward main ----
+git -C "$WORKTREE" rebase "$MAIN" || {
+  git -C "$WORKTREE" rebase --abort 2>/dev/null || true
+  echo "[$ISSUE] REBASE CONFLICT against $MAIN. Resolve manually in $WORKTREE (git rebase $MAIN), then re-run rebase-queue $ISSUE."
+  exit 1
+}
+git -C "$REPO" merge --ff-only "$BRANCH" || {
+  echo "[$ISSUE] ff-merge failed — $MAIN moved mid-rebase or is checked out dirty. Re-run rebase-queue $ISSUE."
+  exit 1
+}
+echo "[$ISSUE] $BRANCH landed on $MAIN"
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/factory-log" branch_landed issue="$ISSUE" branch="$BRANCH" 2>/dev/null || true
+rm -rf "$LOCK"; trap - EXIT
+
+# ---- AAR now that the work has shipped ----
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/kanban-aar" "$ISSUE"
+
+# The product repo has no post-merge hook (that hook lives in the factory repo), so fire
+# the integration signals directly: ping the coordinator and recompute the ready-set for
+# tickets whose dependency just landed.
+COORDINATOR=$(cat ~/.claude/.coordinator 2>/dev/null || true)
+[ -n "$COORDINATOR" ] && KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/tmux-delegate" "$COORDINATOR" \
+  "[$ISSUE] landed on main via rebase-queue. AAR: kanban/aar/$ISSUE-aar.md" 2>/dev/null || true
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/kanban-dispatch" >/dev/null 2>&1 || true
+
+cat << EOF
+
+[$ISSUE] INTEGRATION COMPLETE. Final step — mine your session (self-improvement write-side):
+Scan this session for steps or step-patterns you performed more than twice (setup sequences,
+test bring-up, data seeding, API dances). For each, build the reusable form:
+  - shell-shaped     -> scripts/<name>.sh, registered under "Available scripts" in AGENTS.md
+  - judgment-shaped  -> a skill in .claude/skills/<name>/SKILL.md
+Non-obvious discoveries (API shapes that differed from docs, env gotchas, workarounds) belong
+in the ticket's Lessons learned, which just fed knowledge/lessons.md. Do not mine the obvious.
+EOF

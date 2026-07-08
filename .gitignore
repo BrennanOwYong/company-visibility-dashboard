@@ -24,3 +24,14 @@
 /knowledge/platform/
 /knowledge/architecture.md
 /knowledge/build-plan.md
+/knowledge/technical/feasibility/
+/knowledge/technical/research/
+/knowledge/pipeline.json
+
+# Machine-local guard (temporary hiding measure); settings.json degrades to allow when absent
+/bin/hook-guard-technical
+
+# The product's own repo and its builder worktrees (product code never lives in the factory tree)
+/product/
+/worktrees/
+kanban/

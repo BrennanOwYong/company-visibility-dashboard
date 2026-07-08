@@ -237,5 +237,5 @@ Each becomes an atomic ticket with a HANDOFF and contracts between extension↔R
 
 - Claude Code Remote Control (pairing, outbound-only, short-lived credentials): https://code.claude.com/docs/en/remote-control
 - Claude Desktop Dispatch mobile pairing (QR): https://support.claude.com/en/articles/13947068
-- Integration research (verified 2026-06-22), each with official-doc deep links: `knowledge/research/extension-capture.md`, `knowledge/research/tailscale-pairing.md`, `knowledge/research/receiver-browser.md`, `knowledge/research/aws-deploy.md`.
+- Integration research (verified 2026-06-22), each with official-doc deep links: `knowledge/technical/research/extension-capture.md`, `knowledge/technical/research/tailscale-pairing.md`, `knowledge/technical/research/receiver-browser.md`, `knowledge/technical/research/aws-deploy.md`.
 - Verified 2026-06-19.

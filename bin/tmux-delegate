@@ -25,5 +25,9 @@ LINE=$(python3 -c "import json,sys; print(json.dumps({'ts': int(sys.argv[1]), 'm
 printf '%s\n' "$LINE" >> "$INBOX"
 echo "[delegate] queued -> $AGENT"
 
+# Durable record of every delegated message: pane text scrolls and inbox lines pop on
+# delivery, so the event stream is the only reliable place to observe inter-agent traffic.
+KANBAN_PROJECT_ROOT="$ROOT" "$DIR/factory-log" delegate to="$AGENT" msg="$(printf '%.160s' "$MSG")" 2>/dev/null || true
+
 # Attempt immediate delivery; drain no-ops if the agent is busy or not yet live
 KANBAN_PROJECT_ROOT="$ROOT" "$DIR/inbox-drain" "$AGENT"
