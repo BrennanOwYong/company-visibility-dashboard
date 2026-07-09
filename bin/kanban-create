@@ -79,6 +79,23 @@ CEOF
   done
 fi
 
+# Render --links into an explicit reference list, and warn on any path that does not exist on
+# disk (a dangling reference would send the builder hunting — the opposite of the goal). [[wiki]]
+# module links are not files; skip the existence check for those.
+REFS_BLOCK=""
+MISSING_REFS=""
+IFS=',' read -ra _LINKS <<< "$LINKS"
+for lk in "${_LINKS[@]}"; do
+  lk="$(echo "$lk" | xargs)"; [ -z "$lk" ] && continue
+  REFS_BLOCK="${REFS_BLOCK}- ${lk}
+"
+  case "$lk" in
+    \[\[*) ;;                                              # [[module]] backlink — not a path
+    *) [ -e "$PROJECT_ROOT/$lk" ] || [ -e "$lk" ] || MISSING_REFS="${MISSING_REFS} ${lk}";;
+  esac
+done
+[ -z "$REFS_BLOCK" ] && REFS_BLOCK="- (none listed — roadmap skill must enumerate this ticket's files)"
+
 cat > "$KFILE" << EOF
 ---
 issue: $ISSUE
@@ -114,7 +131,11 @@ ${TESTING:-(how this gets tested and what state to load — architect fills)}
 ## Dependencies
 - Issues: ${DEPENDS:-(none)}${CONTRACT_REFS:+  (contracts:$CONTRACT_REFS )}
 - External infra (user sets up; gates NEEDS_SETUP): ${INFRA:-(none)}
-- Links: ${LINKS:-(none)}
+
+## References
+Every file the builder and validator read for THIS ticket — all the relevant ones, only the
+relevant ones (curated by the roadmap skill from the spec; do not hunt by name):
+${REFS_BLOCK}
 
 ## What was built
 (builder fills this in)
@@ -133,8 +154,11 @@ ${TESTING:-(how this gets tested and what state to load — architect fills)}
 EOF
 
 KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SELF_DIR/factory-log" ticket_created issue="$ISSUE" feature="$FEATURE" dependsOn="$DEPENDS"
+# Refresh the materialized dependency graph (kanban/graph.json) — nodes + edges for this new ticket.
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SELF_DIR/kanban-graph" --emit 2>/dev/null || true
 
 echo "Created issue: $KFILE"
+[ -n "$MISSING_REFS" ] && echo "  ⚠ referenced files not found (fix --links):$MISSING_REFS"
 [ -n "$DEPENDS" ]       && echo "  dependsOn : $DEPENDS"
 [ -n "$INFRA" ]         && echo "  needsInfra: $INFRA"
 [ -n "$LINKS" ]         && echo "  links     : $LINKS"

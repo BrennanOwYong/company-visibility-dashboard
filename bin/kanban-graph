@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 
 const JSON_MODE = process.argv.includes('--json');
+const EMIT_ONLY = process.argv.includes('--emit');   // refresh kanban/graph.json, print nothing
 const root = process.env.KANBAN_PROJECT_ROOT || process.cwd();
 const dir = path.join(root, 'kanban');
 
@@ -36,6 +37,7 @@ for (const f of fs.readdirSync(dir)) {
   issues[id] = {
     id, feature: fm.feature || '', title: fm.title || '', status: fm.status || 'NOT_STARTED',
     milestone: fm.milestone || '', dependsOn: list(fm.dependsOn), needsInfra: list(fm.needsInfra),
+    needs_user_test: (fm.needs_user_test || 'true').trim() !== 'false',
   };
 }
 const ids = Object.keys(issues);
@@ -72,7 +74,32 @@ for (const id of ids) if (id in level) (waves[level[id]] = waves[level[id]] || [
 const infra = {};
 for (const id of ids) for (const inf of issues[id].needsInfra) (infra[inf] = infra[inf] || []).push(id);
 
-const result = { issues, waves, dangling, hasCycle, cyclic, infra };
+// Materialize the dependency DAG as a first-class graph object: nodes = tickets, edges =
+// sequential dependencies. An edge {from, to} means `from` DEPENDS ON `to` — `to` must be DONE
+// before `from` starts. Persisted to kanban/graph.json on every run and refreshed by
+// kanban-create / kanban-update, so the graph is a queryable data object, not a per-call derivation.
+// (Distinct from pipeline.json, which tracks each FEATURE's requirements/feasibility stage.)
+const nodes = ids.map(id => ({
+  id, feature: issues[id].feature, title: issues[id].title, status: issues[id].status,
+  needs_user_test: issues[id].needs_user_test, milestone: issues[id].milestone,
+  wave: (id in level) ? level[id] : null,
+}));
+const edges = [];
+for (const id of ids) for (const d of issues[id].dependsOn) edges.push({ from: id, to: d, rel: 'depends_on' });
+
+const graph = {
+  generatedFrom: 'kanban tickets (dependsOn frontmatter)',
+  nodes, edges,
+  waves: Object.fromEntries(Object.entries(waves).map(([w, arr]) => [w, arr])),
+  hasCycle, cyclic, dangling, infra,
+};
+try {
+  fs.writeFileSync(path.join(dir, 'graph.json'), JSON.stringify(graph, null, 2));
+} catch (e) { /* read-only fs or race — the console/validation output below still works */ }
+
+if (EMIT_ONLY) process.exit(0);   // graph.json refreshed; caller wants no console output
+
+const result = { issues, waves, dangling, hasCycle, cyclic, infra, nodes, edges };
 if (JSON_MODE) { console.log(JSON.stringify(result, null, 2)); process.exit(0); }
 
 console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');

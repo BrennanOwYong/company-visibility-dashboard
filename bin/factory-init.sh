@@ -74,9 +74,21 @@ if [ -z "$FACTORY_AGENT" ]; then
   KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/agent-state" "$SESSION" idle
 fi
 
-# Core directories
+# Core directories. The knowledge/ layout is CANONICAL and identical for every project, so an
+# agent or code-reviewer always knows where each artifact lives regardless of the product:
+#   prd/                       the single living PRD (PM)
+#   spec/                      per-feature technical plans (planner)
+#   contracts/acceptance/      per-feature definition of done (PM)
+#   contracts/iface/           the API/interface contracts per seam (planner)  ← where API shapes live
+#   technical/feasibility/     per-feature feasibility verdicts (planner)
+#   technical/research/        per-technology research the builders read (planner)
 mkdir -p "$PROJECT_ROOT/kanban/user-test-cards"
-mkdir -p "$PROJECT_ROOT/knowledge/contracts"
+mkdir -p "$PROJECT_ROOT/knowledge/prd" \
+         "$PROJECT_ROOT/knowledge/spec" \
+         "$PROJECT_ROOT/knowledge/contracts/acceptance" \
+         "$PROJECT_ROOT/knowledge/contracts/iface" \
+         "$PROJECT_ROOT/knowledge/technical/feasibility" \
+         "$PROJECT_ROOT/knowledge/technical/research"
 
 # AGENTS.md
 if [ ! -f "$PROJECT_ROOT/AGENTS.md" ]; then

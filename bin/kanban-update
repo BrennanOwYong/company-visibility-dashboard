@@ -92,6 +92,8 @@ printf '{"ts":%s,"issue":"%s","from":"%s","to":"%s","notes":%s}\n' \
 echo "[$ISSUE] $STATUS${NOTES:+ — $NOTES}"
 
 KANBAN_PROJECT_ROOT="$PROJECT_ROOT" factory-log task_update issue="$ISSUE" status="$STATUS" from="${PREV_STATUS:-NONE}"
+# Keep the materialized graph's node statuses current.
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" kanban-graph --emit 2>/dev/null || true
 
 # On RUNNING_TESTS the KANBAN spawns (first round) or messages (later rounds) the ticket's own
 # persistent validator session — the builder never does. spawn-validator allocates the test port
