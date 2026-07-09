@@ -72,7 +72,7 @@ What $dep produces that $ISSUE consumes. Fill in the exact shape:
 - endpoint path / event signature / data model
 - request + response schema
 
-$ISSUE builds against this and mocks it; the real $dep implementation is not required to start.
+The dependent builds against the REAL $dep (which is DONE and merged before it starts); this file is the interface spec, not a mock boundary.
 CEOF
     fi
     CONTRACT_REFS="$CONTRACT_REFS knowledge/contracts/$ISSUE-$dep.md"

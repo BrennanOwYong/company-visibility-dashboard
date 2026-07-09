@@ -26,10 +26,8 @@ KANBAN_FILE="$KANBAN_ROOT/kanban/$MERGED_BRANCH.md"
 STATUS=$(grep "^status:" "$KANBAN_FILE" | awk '{print $2}')
 
 if [ "$STATUS" = "DONE" ]; then
-  CARD="$KANBAN_ROOT/kanban/user-test-cards/$MERGED_BRANCH-card.md"
-  [ ! -f "$CARD" ] && KANBAN_PROJECT_ROOT="$KANBAN_ROOT" kanban-generate-card "$MERGED_BRANCH"
   KANBAN_PROJECT_ROOT="$KANBAN_ROOT" tmux-delegate "$COORDINATOR" \
-    "[$MERGED_BRANCH] merged. Status: COMPLETE. User test card at $CARD"
+    "[$MERGED_BRANCH] merged and integrated. Status: DONE."
 else
   KANBAN_PROJECT_ROOT="$KANBAN_ROOT" tmux-delegate "$COORDINATOR" \
     "[$MERGED_BRANCH] merged. Status: $STATUS"

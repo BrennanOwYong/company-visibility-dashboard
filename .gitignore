@@ -34,4 +34,4 @@
 # The product's own repo and its builder worktrees (product code never lives in the factory tree)
 /product/
 /worktrees/
-kanban/
+/kanban/

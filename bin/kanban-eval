@@ -84,7 +84,7 @@ for (const file of kanbanFiles) {
   // Stage discipline: updated kanban at intermediate stages (not just STARTED → COMPLETE)
   const statusSequence = evs.map(e => e.to).filter(s => s !== 'NONE');
   const hasInProgress  = statusSequence.includes('IN_PROGRESS');
-  const jumpedToComplete = statusSequence[0] === 'COMPLETE' || (statusSequence[1] === 'COMPLETE' && !hasInProgress);
+  const jumpedToComplete = statusSequence[0] === 'DONE' || (statusSequence[1] === 'DONE' && !hasInProgress);
   check('Updated kanban at intermediate stages', 15, hasInProgress && !jumpedToComplete,
     jumpedToComplete ? 'jumped from STARTED to COMPLETE without IN_PROGRESS updates' : null);
 
@@ -105,7 +105,7 @@ for (const file of kanbanFiles) {
   }
 
   // Completion: did it reach COMPLETE?
-  const completed = statusSequence.includes('COMPLETE');
+  const completed = statusSequence.includes('DONE');
   check('Reached COMPLETE status', 10, completed, completed ? null : 'never marked complete');
 
   // Rework: check user-test card for "needs work" feedback
@@ -125,18 +125,18 @@ for (const file of kanbanFiles) {
 
 const allEvs = telemetry;
 const totalFeatures = Object.keys(builderScores).length;
-const completedFeatures = Object.values(builderScores).filter(s => s.details.find(d => d.label.includes('COMPLETE') && d.pass)).length;
+const completedFeatures = Object.values(builderScores).filter(s => s.details.find(d => d.label.includes('DONE') && d.pass)).length;
 const blockedFeatures = [...new Set(allEvs.filter(e => e.to === 'NEEDS_SETUP').map(e => e.feature))].length;
 const blockedPct = totalFeatures > 0 ? Math.round((blockedFeatures / totalFeatures) * 100) : 0;
 
 const allStarts    = allEvs.filter(e => e.from === 'NONE').map(e => e.ts);
-const allCompletes = allEvs.filter(e => e.to === 'COMPLETE').map(e => e.ts);
+const allCompletes = allEvs.filter(e => e.to === 'DONE').map(e => e.ts);
 const wallMs  = allStarts.length && allCompletes.length ? Math.max(...allCompletes) - Math.min(...allStarts) : null;
 const serialMs = Object.values(builderScores).reduce((sum, s) => {
   const feat = s.feature;
   const fevs = allEvs.filter(e => e.feature === feat).sort((a,b) => a.ts-b.ts);
   const start = fevs.find(e => e.from === 'NONE');
-  const end   = [...fevs].reverse().find(e => e.to === 'COMPLETE');
+  const end   = [...fevs].reverse().find(e => e.to === 'DONE');
   return sum + (start && end ? end.ts - start.ts : 0);
 }, 0);
 const parallelGain = wallMs && wallMs > 0 ? (serialMs / wallMs).toFixed(2) : null;

@@ -34,7 +34,7 @@ for (const [name, evs] of Object.entries(features)) {
   evs.sort((a, b) => a.ts - b.ts);
 
   const startEv = evs.find(e => e.from === 'NONE' || e.from === '' || e.to === 'STARTED');
-  const completeEv = [...evs].reverse().find(e => e.to === 'COMPLETE');
+  const completeEv = [...evs].reverse().find(e => e.to === 'DONE');
 
   const totalMs = (startEv && completeEv) ? completeEv.ts - startEv.ts : null;
 
