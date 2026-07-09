@@ -74,21 +74,33 @@ for (const id of ids) if (id in level) (waves[level[id]] = waves[level[id]] || [
 const infra = {};
 for (const id of ids) for (const inf of issues[id].needsInfra) (infra[inf] = infra[inf] || []).push(id);
 
-// Materialize the dependency DAG as a first-class graph object: nodes = tickets, edges =
-// sequential dependencies. An edge {from, to} means `from` DEPENDS ON `to` — `to` must be DONE
-// before `from` starts. Persisted to kanban/graph.json on every run and refreshed by
-// kanban-create / kanban-update, so the graph is a queryable data object, not a per-call derivation.
+// Materialize the dependency DAG as a first-class graph object.
+// Edges are DIRECTIONAL prerequisite→dependent: {from: prerequisite, to: dependent} means
+// `from` must be FULFILLED before `to` may start — i.e. the prerequisite points AT the dependent.
+// Each node is gated by an AND over every prerequisite that points at it: it becomes `ready` only
+// when ALL of its `requires` are fulfilled (a node with 2+ deps waits for every one — never any).
+// `fulfilled` := status is DONE (built + merged). Optional/OR dependencies are not modeled here;
+// if a future plan needs them, the roadmap skill decides and this gate is where they'd live.
+// Persisted to kanban/graph.json on every run, refreshed by kanban-create / kanban-update.
 // (Distinct from pipeline.json, which tracks each FEATURE's requirements/feasibility stage.)
-const nodes = ids.map(id => ({
-  id, feature: issues[id].feature, title: issues[id].title, status: issues[id].status,
-  needs_user_test: issues[id].needs_user_test, milestone: issues[id].milestone,
-  wave: (id in level) ? level[id] : null,
-}));
+const isFulfilled = id => !!issues[id] && issues[id].status === 'DONE';
+const nodes = ids.map(id => {
+  const requires = issues[id].dependsOn.filter(d => issues[d]);   // known prerequisites
+  return {
+    id, feature: issues[id].feature, title: issues[id].title, status: issues[id].status,
+    needs_user_test: issues[id].needs_user_test, milestone: issues[id].milestone,
+    wave: (id in level) ? level[id] : null,
+    requires, gate: 'AND',
+    fulfilled: isFulfilled(id),
+    ready: requires.every(isFulfilled),   // AND gate: every prerequisite fulfilled
+  };
+});
 const edges = [];
-for (const id of ids) for (const d of issues[id].dependsOn) edges.push({ from: id, to: d, rel: 'depends_on' });
+for (const id of ids) for (const d of issues[id].dependsOn) if (issues[d]) edges.push({ from: d, to: id, rel: 'prerequisite_of' });
 
 const graph = {
   generatedFrom: 'kanban tickets (dependsOn frontmatter)',
+  edgeSemantics: 'from=prerequisite, to=dependent; a node starts only when ALL prerequisites (its `requires`, gate=AND) are fulfilled (DONE)',
   nodes, edges,
   waves: Object.fromEntries(Object.entries(waves).map(([w, arr]) => [w, arr])),
   hasCycle, cyclic, dangling, infra,
