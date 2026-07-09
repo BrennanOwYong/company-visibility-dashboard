@@ -101,7 +101,7 @@ for KFILE in "$KANBAN_DIR"/*.md; do
   DEPS=$(fm "$KFILE" dependsOn)
   REPO=$(fm "$KFILE" repo)
 
-  # Ready-set gate: every dependency edge must be DONE or contract-covered (see header).
+  # Ready-set gate: every prerequisite (dependency) must be DONE (see header).
   if [ -n "$DEPS" ]; then
     BLOCKER=$(issue_ready "$ISSUE" "$DEPS") || {
       echo "  • $ISSUE — waiting on '$BLOCKER' (prerequisite not DONE) — next pass"
