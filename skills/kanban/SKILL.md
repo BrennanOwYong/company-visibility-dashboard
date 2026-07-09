@@ -13,16 +13,18 @@ The architect created it with your brief — read these sections first: **Intent
 spawn-builder creates your issue  →  status: NOT_STARTED
 You begin                         →  kanban-update $FEATURE_NAME IN_PROGRESS "starting"
 You build                         →  kanban-update $FEATURE_NAME IN_PROGRESS "what you're doing"
-You need external infra set up     →  kanban-update $FEATURE_NAME NEEDS_SETUP "what the user must set up"
+You need something only a human has→  kanban-update $FEATURE_NAME NEEDS_SETUP "exactly what you need + who provides it"
   user finishes the setup         →  resume; set IN_PROGRESS again
-You finish the build              →  fill kanban sections, then:
-                                     kanban-update $FEATURE_NAME NEEDS_TESTING "summary"
-                                     ← assigns a port, auto-generates the test card, pings coordinator
-You DO NOT call kanban-done       →  coordinator calls it after user approves → COMPLETE
+You finish the build              →  fill kanban sections + set test_command + commit, then:
+                                     kanban-update $FEATURE_NAME RUNNING_TESTS "summary"
+                                     ← the KANBAN spawns your validator (you do NOT spawn it)
+Validator queues VALIDATION-FAILED →  fix the defects, then RUNNING_TESTS again to re-trigger it
+On a passing verdict              →  the kanban routes the ticket onward; you are done
+You DO NOT call kanban-done, NEEDS_USER_TESTING, or DONE — the kanban and coordinator own those
 ```
 
-Dependencies on other tickets do NOT block you: build against the contract in
-knowledge/contracts/ and mock it. There is no "waiting on another issue" state.
+Your dependencies are already built and merged into your branch's base — build against the REAL
+code in knowledge/contracts/ interfaces, not a mock. There is no "waiting on another issue" state.
 
 ## Status values
 
@@ -30,11 +32,12 @@ The canonical vocabulary, in pipeline order:
 
 | Status | Who sets it | What it means |
 |---|---|---|
-| `NOT_STARTED` | spawn-builder | Ticket created, agent has not begun |
-| `IN_PROGRESS` | Builder | Actively building |
-| `NEEDS_SETUP` | Builder | Paused: user must set up external infra the agent cannot — state exactly what and who |
-| `NEEDS_TESTING` | Builder | Build done, ready for the testing phase. **Assigns a port + triggers test card.** |
-| `COMPLETE` | Coordinator (via kanban-done) | User approved, ticket closed |
+| `NOT_STARTED` | dispatch | Ticket created; its dependencies are not all DONE yet |
+| `IN_PROGRESS` | Builder | Actively building on real merged deps |
+| `NEEDS_SETUP` | Builder | Paused: a human must provide a credential/account/access — state exactly what and who |
+| `RUNNING_TESTS` | Builder | Build done + committed; the kanban spawns the validator to test the real system |
+| `NEEDS_USER_TESTING` | Kanban | Validated; a `needs_user_test` ticket waits for the human's Test step on the board |
+| `DONE` | Kanban / kanban-done | Integrated onto main |
 
 ## Commands
 
@@ -44,13 +47,13 @@ kanban-update $FEATURE_NAME IN_PROGRESS "implementing the checkout form"
 kanban-update $FEATURE_NAME NEEDS_SETUP "user must create a Stripe account and add STRIPE_SECRET_KEY"
 
 # When the build is done — fills kanban sections first, then:
-kanban-update $FEATURE_NAME NEEDS_TESTING "checkout form complete, 4 Playwright tests pass"
+kanban-update $FEATURE_NAME RUNNING_TESTS "checkout form complete, 4 Playwright tests pass"
 
 # Check the full board
 kanban-check
 ```
 
-## What to fill in before calling NEEDS_TESTING
+## What to fill in before calling RUNNING_TESTS
 
 Open `$KANBAN_PROJECT_ROOT/kanban/$FEATURE_NAME.md` and fill in:
 
@@ -64,7 +67,7 @@ Key implementation decisions. Data flow. Any non-obvious choices.
 ## Tests run
 - [x] Description of each passing test (user-facing language, not technical)
 
-Run browser tests with agent-browser before calling NEEDS_TESTING:
+Run browser tests with agent-browser before calling RUNNING_TESTS:
 ```bash
 npm install -g agent-browser && agent-browser install   # once per machine
 agent-browser snapshot          # get element refs
@@ -95,4 +98,4 @@ The coordinator calls `kanban-done` after user approval:
 ```bash
 kanban-done $FEATURE_NAME "user feedback summary" "any additional notes"
 ```
-This writes the after-action-report to `kanban/aar/$FEATURE_NAME-aar.md`, extracts lessons to `knowledge/lessons.md`, marks COMPLETE, and checks if the dependency cluster is fully closed.
+This writes the after-action-report to `kanban/aar/$FEATURE_NAME-aar.md`, extracts lessons to `knowledge/lessons.md`, marks DONE, and checks if the dependency cluster is fully closed.

@@ -28,16 +28,16 @@ When `factory.json` exists in the project root, this session is the coordinator.
    ```
    `--repo` points at the PRODUCT's own git repo (convention: `<project>/product`, git-initialized before dispatch) — never the factory tree; spawn-builder refuses the factory root.
    `--depends-on` = other issues this waits on (spec §6). `--needs-infra` = external infra the user must set up (spec §7; each surfaces as NEEDS_SETUP). `--milestone` + deps express what to build and when (spec §8). Status starts NOT_STARTED; a port is allocated when the ticket's validator boots (kanban-port).
-6. kanban-create scaffolds an empty contract stub per dependency edge at `knowledge/contracts/<issue>-<dep>.md`. Fill each from spec §6 with the exact shape the dependency produces (endpoint path, request/response schema, event signature, data model). The dependent issue builds against it and mocks it; the real implementation is not required to start.
+6. kanban-create scaffolds an empty contract stub per dependency edge at `knowledge/contracts/<issue>-<dep>.md`. Fill each from spec §6 with the exact shape the dependency produces (endpoint path, request/response schema, event signature, data model). This is the interface spec the dependent's builder reads; because a dependent starts only after its dependency is DONE and merged, it builds against the real implementation, not a mock.
 7. Run `kanban-graph` to verify the roadmap: no cycles, no dangling deps, and review the build waves (what is parallel, what waits) and the external-infra rollup against spec §8.
 8. Dispatch builders via `kanban-dispatch` (calls spawn-builder.sh once per READY issue, creating each git worktree). Ready = every dependency edge DONE or its edge contract filled; an unfilled stub keeps the ticket waiting for its dependency to merge. One builder per ready independent branch, under the MAX_BUILDERS rate-limit ceiling. spawn-builder uses the issue you created — it does not overwrite it.
 
 **Coordination loop (reactive — no polling):**
-- Git post-merge hook fires tmux send-keys into this session when a builder merges
-- On NEEDS_SETUP: surface to user the exact external setup required, resolve, write resolution to the kanban file, ping builder
-- On NEEDS_TESTING: validation already passed inside IN_PROGRESS (the transition is refused otherwise) — present the user-test card from `kanban/user-test-cards/` to the user; only taste is being judged.
-- On user approval: call `kanban-done <issue> "<feedback>"` to close the ticket
-- When all features approved: spawn sanity agent (Sonnet) in new tmux session
+- Git post-merge hook pings this session when a ticket integrates; the kanban re-dispatches whatever became ready (deps now DONE).
+- On NEEDS_SETUP: surface to the user the exact thing the builder needs (a login/account/key), resolve it, write the resolution to the kanban file, ping the builder.
+- On NEEDS_USER_TESTING: validation already passed (RUNNING_TESTS → VALIDATED) — the ticket is waiting on the board's Test button. Point the user at the board; only taste is being judged. `needs_user_test:false` tickets never reach here (they auto-integrate).
+- On user "all clear": `kanban-done <issue> "<feedback>"` closes and integrates the ticket. On reported issues: route to the PM agent to decide same-ticket fix vs new tickets.
+- When all features are DONE: spawn the sanity agent (Sonnet) in a new tmux session.
 
 **Models:** coordinator = Opus | builders = Sonnet 4.5 | research subagents = Sonnet | validator = Sonnet | sanity = Sonnet
 
@@ -58,18 +58,19 @@ Builders run as `claude --dangerously-skip-permissions` in their own tmux sessio
 
 **During build:** update kanban status at every meaningful stage using `kanban-update <issue> <STATUS> <notes>`.
 
-Status values (canonical, in pipeline order — shift-left: everything objective resolves as early as possible):
-- `NOT_STARTED` — ticket created, agent has not begun.
-- `IN_PROGRESS` — the ENTIRE build-validate feedback loop: build, self-test, then spawn the independent validator (`spawn-agent validator-agent "VALIDATE: <issue> — ..."`) while still in this state, fix everything its VALIDATION-FAILED feedback lists, request re-validation, repeat until it passes. kanban-update refuses the next transition without a passing verdict.
-- `NEEDS_SETUP` — built, but blocked on something only the human can provide: a credential, an account, an access grant. You have already tried to set it up yourself. Always include remarks stating exactly what you need and who can provide it.
-- `NEEDS_TESTING` — validation passed; ONLY user experience and taste remain. Test card generated automatically.
-- `DONE` — user approved; tested and ready for PR/merge (coordinator sets it via kanban-done).
+Status values (canonical, in pipeline order). You are your ticket's single persistent builder — you keep your context for the ticket's whole life, including every re-validation round:
+- `NOT_STARTED` — ticket created; its dependencies are not all DONE yet.
+- `IN_PROGRESS` — you are building and self-testing, against your dependencies' REAL merged code (not mocks).
+- `NEEDS_SETUP` — blocked on something only the human can provide: a credential, an account, an access grant. You have already tried to set it up yourself. Always include remarks stating exactly what you need and who can provide it.
+- `RUNNING_TESTS` — you are done building, filled the completion sections, set `test_command`, and committed. You set this; **the KANBAN then spawns your validator** — you do NOT spawn it. When the validator queues `VALIDATION-FAILED`, fix the defects and set `RUNNING_TESTS` again to re-trigger it. On a passing verdict the kanban routes the ticket onward and you are done.
+- `NEEDS_USER_TESTING` — validation passed and the ticket needs a human's taste; the kanban sets this (only for `needs_user_test:true` tickets). Not yours to set.
+- `DONE` — integrated onto main (kanban / kanban-done sets it).
 
-Dependencies on other issues do not block a builder: build against the contract and mock it. There is no cross-issue blocked state.
+Dependencies are already built and merged into your branch's base — build against the real code and run it end to end. There is no cross-issue blocked state.
 
 **Contested verdicts:** you never negotiate with the validator and it never negotiates with you. If a defect verdict misreads the contract, route the dispute to the planner, who owns the spec: `spawn-agent technical-planning-agent "CONTESTED-VERDICT: <issue> — assertion <n>, <why the verdict misreads the contract>"`. After three failed rounds on the same assertion the validator escalates to the human; do not grind a fourth.
 
-A port is allocated the moment your validator boots (spawn-agent's VALIDATE path runs kanban-port) — read it from your ticket's frontmatter and serve the app there for validation. Until then, no port is reserved.
+A port is allocated the moment your validator boots (the kanban's RUNNING_TESTS reaction runs kanban-port) — read it from your ticket's frontmatter and serve the app there. Until then, no port is reserved.
 
 **UX baseline (every user-facing surface, no exceptions):** the architecture provides these once; use its provision, do not reinvent or skip:
 - A loading/skeleton state for every async operation; no dead screens while data fetches
@@ -81,7 +82,7 @@ A port is allocated the moment your validator boots (spawn-agent's VALIDATE path
 
 **Quality SOP (shift-left — these are BUILD activities, not a later audit):** while building, not after: performance (no N+1 patterns, no unbounded queries/loops, respect the architecture's perceived-speed budget), code quality (typed seams with no `any`, unique greppable names, no dead code, conventional patterns over clever ones), security (validate every input at the boundary, parameterized queries only, secrets via env only, no exposed debug surfaces, idempotent webhook ingress), and UX best practices (the UX baseline below). The validator re-checks what is objectively assertable; anything you skipped here is your defect when it does.
 
-**Tests:** run browser tests using agent-browser against the live app before calling NEEDS_TESTING. Test your own issue only. Everything an LLM can verify is YOUR job during the build: functional flows, edge cases, empty/error states, the acceptance assertions in `--success`, and the UX baseline above (throttle the network to see the loading states; reload to verify cache hits; watch for layout shift). The user is only ever asked for taste — feel, flow, visual coherence, perceived speed. An objectively checkable item on the user's card is your defect.
+**Tests:** run browser tests using agent-browser against the live app before calling RUNNING_TESTS. Test your own issue only. Everything an LLM can verify is YOUR job during the build: functional flows, edge cases, empty/error states, the acceptance assertions in `--success`, and the UX baseline above (throttle the network to see the loading states; reload to verify cache hits; watch for layout shift). The user is only ever asked for taste — feel, flow, visual coherence, perceived speed. An objectively checkable item that reaches the user's Test step is your defect.
 
 Install if missing: `npm install -g agent-browser && agent-browser install`
 
@@ -91,9 +92,9 @@ agent-browser workflow:
 3. `agent-browser screenshot` — capture state
 4. Re-snapshot after each interaction to verify the result
 
-**On completion — before calling NEEDS_TESTING:**
-- ALL completion writes go into the CANONICAL ticket at `$KANBAN_PROJECT_ROOT/kanban/<issue>.md` — HANDOFF.md in your worktree is a read-only briefing copy; nothing downstream reads it (kanban-update refuses the transition while the canonical file holds placeholders)
-- Commit everything on your `feat/<issue>` branch — code, scripts, all of it (kanban-update refuses NEEDS_TESTING while the worktree is dirty; an uncommitted build is lost when the worktree is pruned). Merging to main happens after user approval, not now.
+**On completion — before calling RUNNING_TESTS:**
+- ALL completion writes go into the CANONICAL ticket at `$KANBAN_PROJECT_ROOT/kanban/<issue>.md` — HANDOFF.md in your worktree is a read-only briefing copy; nothing downstream reads it (kanban-update refuses RUNNING_TESTS while the canonical file holds placeholders)
+- Commit everything on your `feat/<issue>` branch — code, scripts, all of it (kanban-update refuses RUNNING_TESTS while the worktree is dirty; an uncommitted build is lost when the worktree is pruned). Merging to main happens after the ticket is validated (and, for user-test tickets, approved) — not now.
 - Fill `## What was built` — what the feature does from the user's perspective
 - Fill `## How it works` — key implementation decisions, data flow, non-obvious choices
 - Fill `## Tests run` — each passing test in `- [x]` format
@@ -102,9 +103,9 @@ agent-browser workflow:
 - If you ran the same shell command more than twice, extract it to `scripts/<name>.sh` and add it to AGENTS.md under "Available scripts"
 - Add any new reusable module to AGENTS.md and modules.json
 
-Then call: `kanban-update <issue> NEEDS_TESTING "<summary>"`
+Then call: `kanban-update <issue> RUNNING_TESTS "<summary>"` — the kanban spawns your validator. Stay in the session; fix any `VALIDATION-FAILED` and set `RUNNING_TESTS` again to re-trigger it.
 
-Do NOT call `kanban-done` — the coordinator calls that after user approval.
+Do NOT call `kanban-done` and do NOT set NEEDS_USER_TESTING or DONE — the kanban and coordinator own those.
 
 **Secrets:** never write a literal secret value anywhere. Use process.env.VARIABLE_NAME. Add values to .env.test only.
 
@@ -124,16 +125,10 @@ Required:
 
 ## Automated testing — two layers, maker is never the tester
 
-Layer 1, the builder: every objective test it can express (functional, edge cases, states, UX baseline) runs during the build against the live app. A build is not ready for NEEDS_TESTING until the builder's own tests pass. These prove the builder's interpretation.
+Layer 1, the builder: every objective test it can express (functional, edge cases, states, UX baseline) runs during the build against the live app. A build is not ready for RUNNING_TESTS until the builder's own tests pass. These prove the builder's interpretation.
 
-Layer 2, the validator: at NEEDS_TESTING, `validator-agent` (fresh context, spawned with `VALIDATE: <issue>`) authors its OWN tests from the ticket's success criteria and the acceptance contract — before looking at the builder's tests — and runs them on the live app. It writes `kanban/validation/<issue>.md` with per-assertion verdicts; every failure is classified `builder-defect` (routed back to the builder session), `test-defect` (its own test was wrong; corrected and recorded), `ticket-underspecified` (routed to the planner as TICKET-GAP), or `external` (out of our control → NEEDS_SETUP with exactly what is needed). The user-test card goes to the user only after validation passes; the user is never the first line of correctness defense and is only ever asked for taste.
+Layer 2, the validator: on RUNNING_TESTS the kanban spawns the ticket's OWN persistent `validator-agent` (fresh context, session `val-<issue>`). It authors its OWN tests from the ticket's success criteria and the acceptance contract — before looking at the builder's tests — and runs them on the real running system. It writes `kanban/validation/<issue>.md` with per-assertion verdicts; every failure is classified `builder-defect` (queued back to the builder session, which fixes and re-triggers RUNNING_TESTS), `test-defect` (its own test was wrong; corrected and recorded), `ticket-underspecified` (routed to the planner as TICKET-GAP), or `external` (out of our control → NEEDS_SETUP with exactly what is needed). On a passing verdict it runs `kanban-update <issue> VALIDATED`, and the kanban routes onward. The user is reached only after validation passes, and only for taste.
 
 ## User-testing breakpoints
 
-Every user-facing feature gets a `[USER-TEST]` breakpoint. When execution reaches one, the coordinator presents a test card before continuing. The card has:
-1. **SETUP** — shell commands to bring the app to the testable state
-2. **WHAT TO DO** — short numbered walkthrough
-3. **YOUR CALL** — open-ended prompts about how the feature feels, flows, and whether it delivers what was asked for. Not a checklist — a conversation.
-4. **ALREADY VERIFIED BY BUILDER** — what automated tests already covered
-
-Hold execution until the user replies.
+A `needs_user_test:true` ticket, once validated, waits at NEEDS_USER_TESTING for the human. The board's **Test** button sets up that ticket's whole environment — checks out its branch, runs its startup scripts, injects creds, lands the user on the right page — so the user only clicks one thing, then judges taste. A prep/explainer page shows what they're about to test and how it relates to the product, reassures them the technology is already validated, and offers Skip. The user's feedback ("all clear" or specific issues) is the only human input; issues route to the PM agent to decide same-ticket fix vs new tickets. Backend (`needs_user_test:false`) tickets never surface to the user.
