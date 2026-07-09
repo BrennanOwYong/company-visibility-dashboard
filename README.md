@@ -1,6 +1,7 @@
 # software_factory_cc
 
-Clone this repo. Open Claude Code inside it. Type `/hi` to start.
+A software factory: a pipeline of Claude agents that turns a non-technical person's request
+into shipped, tested software. Clone the repo, open Claude Code inside it, type `/hi`.
 
 ```bash
 git clone https://github.com/BrennanOwYong/software_factory_cc.git my-project
@@ -15,171 +16,157 @@ claude .
 flowchart TD
     U([Owner describes what to build]) --> PM[PRD Agent - /hi<br/>requirements at product altitude]
     PM -->|knowledge/prd + acceptance contracts| HO{{handoff-to-planner}}
-    HO --> TP[Technical Planning Agent<br/>feature plans, architecture, interface contracts, gate]
-    TP --> DR[Deep Review per task<br/>assumptions vs live code index, re-plan never impossible]
-    DR --> RB[Roadmap and Branching skill<br/>build-plan.yaml + one ticket per task]
-    RB -->|tickets via tracker adapter| KB[(Kanban board)]
-    KB --> DSP{{Dispatch - card done triggers next}}
-    DSP --> BLD[Builder agents in tmux<br/>fresh context per card, build + self-test]
-    BLD --> VG[Adversarial Validation Gate<br/>fresh-context validator on a different model<br/>checks the running artifact vs acceptance]
-    VG -->|pass| DONE([Owner reviews and approves])
-    VG -->|fail| BLD
+    HO --> TP[Technical Planning Agent<br/>feature plans, derived architecture, interface contracts, validation gate]
+    TP --> RB[Roadmap & Branching skill<br/>one atomic ticket per task<br/>auto-tags needs_user_test]
+    RB -->|tickets| KB[(Kanban board — source of truth)]
+    KB --> DSP{{Kanban orchestrator<br/>starts a ticket when ALL its deps are DONE}}
+    DSP --> BLD[Builder - interactive tmux session<br/>ONE per ticket, persists its whole life<br/>builds on real merged deps, self-tests]
+    BLD -->|kanban-update RUNNING_TESTS| VAL[Validator - interactive tmux session<br/>ONE per ticket, spawned by the kanban<br/>authors its own tests, runs the REAL system]
+    VAL -->|fail: queued VALIDATION-FAILED| BLD
+    VAL -->|pass + needs_user_test=false| INT[Auto-integrate: rebase onto main + AAR]
+    VAL -->|pass + needs_user_test=true| UT[NEEDS_USER_TESTING<br/>board Test button sets up the env]
+    UT -->|all clear| INT
+    UT -->|issues| PMT[PM triage<br/>same-ticket fix, or new tickets]
+    INT --> DONE([DONE — merge triggers the next ready tickets])
+    NS[[NEEDS_SETUP<br/>blocked on a human-only credential/login]]
+    BLD -.-> NS -.-> BLD
 ```
 
-Each arrow is a separate context, by design: product intent, technical planning, and validation never share a window. Live today: PRD agent, handoff, technical planner, roadmap-and-branching, kanban, dispatch, builders. Deep Review and the Validation Gate are specified and being built.
+Each box is a separate context by design: product intent, technical planning, building, and
+validation never share a window. The kanban ticket file is the single source of truth for state;
+the builder and validator drive it via `kanban-update`. A human is touched at exactly two points —
+**infra setup** (a credential only they hold) and **user testing** (taste) — and nowhere else.
+
+### The core loop, in words
+
+1. **Roadmap → tickets.** The planner decomposes the plan into atomic tickets, each carrying its
+   dependencies, filled interface contracts, and an auto-set `needs_user_test` tag (true when the
+   task produces something a person judges by feel; false for pure plumbing).
+2. **Dependency-ordered start.** A ticket starts only once **every ticket it depends on is DONE and
+   merged** — so it branches from a main that already contains real, working dependencies and can
+   actually run end-to-end. Dep-free tickets go first; a dependent starts the moment its last
+   dependency finishes. Independent tickets run in parallel.
+3. **One builder per ticket, for the ticket's whole life.** It's an interactive tmux session (never
+   headless) that keeps its context — what it built, what it learned — across every round. It marks
+   `IN_PROGRESS`, builds, self-tests, and sets `NEEDS_SETUP` (with an exact remark) only if it hits
+   something only a human can provide.
+4. **Builder → RUNNING_TESTS → the kanban spawns the validator.** When the build is ready the builder
+   sets `RUNNING_TESTS`; the kanban reacts by spawning (first round) or messaging (later rounds) the
+   ticket's own persistent validator. The validator reads the ticket and decides its approach — write
+   a test script, drive the live site, or a mix — and runs against the **real running system**, not a
+   mock. Fail → it queues `VALIDATION-FAILED` back to the same builder → fix → `RUNNING_TESTS` again.
+5. **The one branch — `needs_user_test`.** On a passing verdict: false → auto-integrate to `DONE`;
+   true → park at `NEEDS_USER_TESTING`, where the board's Test button sets up the environment for you.
+   Your "all clear" integrates it; reported issues route to the PM agent, which decides whether the
+   same builder fixes it or it needs new tickets.
+6. **Completion drives the next.** Each merge re-checks which tickets just had their last dependency
+   satisfied and starts them. The loop runs until every ticket is `DONE`.
+
+### Agent-to-agent messaging (why it doesn't stall)
+
+Agents never type into each other directly. A message is **enqueued by a tool call** into the
+recipient's inbox. Claude Code's native **Stop hook** — the "this agent is completely done with its
+turn" signal — fires and drains the next queued message into the now-idle session. Delivering only
+into a genuinely idle session, on the assumption each message one-shots its task, is what keeps the
+loop from stalling. This is why tight ticket breakdown matters: one message should equal one clean
+turn.
+
+## Status vocabulary
+
+```
+NOT_STARTED  →  IN_PROGRESS  →  RUNNING_TESTS  →  NEEDS_USER_TESTING  →  DONE
+                     │                                  (skipped when
+                     └── NEEDS_SETUP ──┘                 needs_user_test=false;
+                     (human provides a                   auto-integrates to DONE)
+                      credential, then resumes)
+```
+
+- **NOT_STARTED** — ticket created; waiting for its dependencies to finish.
+- **IN_PROGRESS** — the builder is building and self-testing.
+- **NEEDS_SETUP** — blocked on something only a human holds (a login, an account, a key). The builder
+  states exactly what it needs; you provide it; the builder resumes.
+- **RUNNING_TESTS** — the builder is done; the validator is independently testing the real system.
+- **NEEDS_USER_TESTING** — validated (function, performance, requirements). Only taste remains; the
+  board Test button is live. Non-user-test tickets never enter this state.
+- **DONE** — integrated onto main. Its completion starts any tickets that were waiting on it.
 
 ## Prerequisites
 
-**tmux** is required. Builders run as parallel tmux sessions.
+**tmux** is required — every builder and validator is a tmux session.
 
-Check if installed:
 ```bash
-which tmux        # prints path if installed
-tmux -V           # prints version
+tmux -V                       # check it's installed
+sudo apt install tmux         # Ubuntu / Debian / WSL
+brew install tmux             # macOS
 ```
 
-Install if missing:
-```bash
-# Ubuntu / Debian / WSL
-sudo apt install tmux
-
-# macOS
-brew install tmux
-```
-
-Check if your current terminal is already inside a tmux session:
-```bash
-echo $TMUX        # non-empty = you're in tmux, empty = you're not
-```
-
-You do **not** need to be inside a tmux session yourself. Any terminal on a machine that has tmux installed can spawn tmux sessions. The factory spawns builders into tmux regardless of whether your own shell is in one.
-
-Other requirements:
-- **Node.js 18+** — for the kanban UI
+You do **not** need to be inside a tmux session yourself; the factory spawns its own. Also required:
+- **Node.js 18+** — for the kanban board UI
 - **Claude Code CLI** — installed and authenticated
 - **WSL2 or Linux** — Windows native not supported
 
-## What it does
-
-The coordinator (Claude Opus) asks what you want to build, walks through each feature's user flow with you, writes a spec and contracts, then spawns parallel builder agents (Claude Sonnet) as tmux sessions. Each builder works in an isolated git worktree. When a builder finishes and tests pass, it generates a test card and pings the coordinator. You review it, give feedback, and the coordinator closes the ticket.
-
 ## How it activates
 
-`CLAUDE.md` and `.claude/settings.json` in this repo root are picked up automatically by Claude Code. On session start, `bin/factory-init.sh` runs and detects `factory.json` — that's what puts the session into coordinator mode. Edit `factory.json` to point at your repos.
+`CLAUDE.md` and `.claude/settings.json` at the repo root are picked up automatically. On session
+start, `bin/factory-init.sh` runs, detects `factory.json`, and puts the session into coordinator
+mode. Product code is built in its own git repo (convention: `<project>/product`) — never in the
+factory tree.
 
-## Kanban UI
-
-```bash
-KANBAN_PROJECT_ROOT=$(pwd) node kanban-ui/server.js
-```
-
-Opens at `http://localhost:2999`. Shows all tickets by status, the feature each belongs to, test card content for NEEDS_TESTING tickets, and a Launch Test button. The PRD (product requirements) page is linked from the header.
-
-## Kanban scripts
-
-Scripts live in `bin/`. They are added to your PATH automatically on first session start.
-
-| Script | Who calls it | What it does |
-|---|---|---|
-| `kanban-update <issue> <status> [notes]` | Builder | Updates ticket status; NEEDS_TESTING assigns a port + triggers test card |
-| `kanban-check` | Anyone | Prints board state to terminal |
-| `kanban-done <issue> <feedback>` | Coordinator | Writes after-action report, marks COMPLETE |
-| `kanban-generate-card <issue>` | Auto on NEEDS_TESTING | Writes user test card |
-| `kanban-resolved <issue>` | Coordinator | Resumes a NEEDS_SETUP ticket after the user does the setup |
-| `kanban-create <issue> --feature <name> [opts]` | Architect | Creates one issue with all roadmap data (deps, infra, links, intent, testing); scaffolds contract stubs |
-| `kanban-graph` | Architect/Anyone | Build waves + cycle/dangling-dep/infra check over the issue graph |
-| `kanban-dispatch` | Coordinator | Spawns one builder per NOT_STARTED issue (idempotent) |
-| `kanban-perf` | Anyone | Timing report from telemetry |
-| `spawn-builder.sh` | kanban-dispatch | Creates worktree + kanban entry + tmux session (once per agent) |
-| `factory-init.sh` | SessionStart hook | Registers coordinator, installs post-merge hooks |
-
-## Ticket lifecycle
-
-```
-kanban-create  →  NOT_STARTED  (architect, with all roadmap data)
-kanban-dispatch → spawn-builder  (one builder per issue)
-builder begins →  kanban-update IN_PROGRESS
-needs infra    →  kanban-update NEEDS_SETUP  (user sets up external infra, then resume)
-build done     →  kanban-update NEEDS_TESTING  (port assigned, test card generated, coordinator pinged)
-user approves  →  kanban-done  (after-action report written, ticket COMPLETE)
-```
-
-## File layout
-
-```
-my-project/
-  CLAUDE.md               ← coordinator + builder rules (this repo)
-  .claude/settings.json   ← SessionStart hook (this repo)
-  factory.json            ← edit this: point at your repos
-  bin/                    ← all scripts (added to PATH on first run)
-  kanban-ui/              ← kanban board server
-  skills/kanban/          ← kanban skill, copied to ~/.claude/skills/ on first run
-  kanban/                 ← created on first run
-    <issue>.md
-    user-test-cards/
-    aar/
-    telemetry.jsonl
-  knowledge/              ← created on first run
-    technical-spec.md
-    user-flow.md
-    lessons.md
-    contracts/
-```
-
-## Kanban UI
-
-Reads `kanban/*.md` in the project root and serves a status board at `http://localhost:2999`.
+## Kanban board UI
 
 ```bash
 KANBAN_PROJECT_ROOT=/path/to/your/project node kanban-ui/server.js
 ```
 
-The UI shows tickets by status, the feature each ticket belongs to, test card content for NEEDS_TESTING tickets, and a Launch Test button that runs the builder's `test_command` in the background.
+Opens at `http://localhost:2999`. Shows every ticket by status. Clicking a ticket opens its
+per-feature sub-PRD. User-test tickets show a **Test** button that sets up that ticket's environment
+so you only ever click one thing; backend tickets show status only. The board reloads only when a
+ticket actually changes.
 
-## Kanban scripts
-
-All scripts live in `~/.claude/bin/` after install. Builders invoke them via the kanban skill (`Skill({skill:"kanban"})`).
+## Kanban scripts (`bin/`, added to PATH on first run)
 
 | Script | Who calls it | What it does |
 |---|---|---|
-| `kanban-update <issue> <status> [notes]` | Builder | Updates ticket status; NEEDS_TESTING assigns a port + triggers test card generation |
-| `kanban-check` | Anyone | Renders current board state in the terminal |
-| `kanban-done <issue> <feedback>` | Coordinator | Writes after-action report, extracts lessons, marks COMPLETE |
-| `kanban-generate-card <issue>` | Auto (on NEEDS_TESTING) | Writes user test card to `kanban/user-test-cards/` |
-| `kanban-resolved <issue>` | Coordinator | Resumes a NEEDS_SETUP ticket after the user does the setup, pings the builder |
-| `kanban-create <issue> --feature <name> [opts]` | Architect | Creates one issue with all roadmap data; scaffolds contract stubs per dependency |
-| `kanban-graph` | Architect/Anyone | Build waves + cycle/dangling/infra validation over the issue graph |
-| `kanban-dispatch` | Coordinator | Spawns one builder per NOT_STARTED issue (idempotent) |
-| `kanban-perf` | Anyone | Timing report from telemetry |
-| `kanban-eval` | Anyone | Quality report |
-| `spawn-builder.sh` | kanban-dispatch | Creates worktree + kanban entry + tmux session (once per agent) |
-| `factory-init.sh` | SessionStart hook | Registers coordinator session, installs post-merge hooks |
+| `kanban-create <issue> --feature <name> [opts]` | Planner (roadmap skill) | Creates one ticket with all roadmap data — deps, infra, links, intent, success, `--needs-user-test`, `--landing-url`; scaffolds contract stubs |
+| `kanban-graph` | Planner / anyone | Build waves + cycle / dangling-dep / infra check over the ticket graph |
+| `kanban-dispatch` | Kanban orchestrator | Starts a builder for every ticket whose dependencies are all DONE (idempotent; re-runs on each completion) |
+| `spawn-builder.sh` | kanban-dispatch | Creates the worktree (branched from merged main) + tmux session for a ticket's builder |
+| `spawn-agent <name> ["msg"]` | Kanban / agents | Spawns/points a planning or validator agent session; allocates the ticket's test port on a `VALIDATE:` kickoff |
+| `kanban-update <issue> <status> [notes]` | Builder | Moves the ticket through the state machine; on RUNNING_TESTS the kanban spawns the validator; routes by `needs_user_test` |
+| `kanban-port <issue>` | Validator spawn path | Allocates the ticket's serving port on demand |
+| `rebase-queue <issue>` | On approval / auto | Serial-rebases the ticket's branch onto main, one at a time, then writes the AAR |
+| `kanban-aar <issue>` | rebase-queue | Writes the after-action report and mines repeated steps |
+| `kanban-check` / `kanban-perf` / `kanban-eval` | Anyone | Board state / timing / quality reports |
+| `tmux-delegate <agent> <msg>` | Agents / scripts | Enqueues a message; the recipient's Stop hook injects it when idle |
+| `factory-init.sh` | SessionStart hook | Registers the coordinator, installs post-merge hooks |
 
-## Ticket lifecycle
-
-```
-kanban-create → NOT_STARTED  (architect, with all roadmap data)
-kanban-dispatch → spawn-builder  (one builder per issue)
-builder begins → kanban-update IN_PROGRESS
-needs infra   → kanban-update NEEDS_SETUP  (user sets up external infra, then resume)
-build done    → kanban-update NEEDS_TESTING  (port assigned, test card generated, coordinator pinged)
-user approves → kanban-done  (writes after-action report, marks COMPLETE)
-```
+`PIPELINE.md` holds the full flow diagram, the verified producer/consumer joint table, and per-agent
+test procedures — read it before changing any handoff.
 
 ## File layout (per project)
 
 ```
 project-root/
   factory.json              # activates factory mode
+  product/                  # the product's OWN git repo — all product code lives here
+  worktrees/                # one builder worktree per in-flight ticket
   kanban/
-    <issue>.md              # one ticket per issue
-    user-test-cards/        # generated test cards
-    aar/                    # after-action reports
+    <issue>.md              # one ticket — the source of truth for its state
+    validation/<issue>.md   # the validator's per-assertion verdicts
+    aar/                    # after-action reports (written at integration)
+    inbox/, agents/         # message queues + agent idle/busy state
     telemetry.jsonl         # event log for kanban-perf
   knowledge/
-    technical-spec.md       # architect's primary deliverable — design issues derive from
-    user-flow.md            # written during spec phase
-    edge-cases.md           # negative cases derived from the flow
-    lessons.md              # extracted builder learnings
-    contracts/              # interface contracts between issues
+    prd/product.md          # the single living PRD (one section per feature)
+    architecture.md         # the derived architecture + ADRs
+    spec/                   # per-feature technical plans
+    contracts/              # acceptance contracts + interface contracts between tickets
+    technical/research/     # the planner's research the builders read instead of re-researching
+    lessons.md              # mined builder learnings
 ```
+
+## Development
+
+`scripts/smoke-test.sh` exercises the deterministic layer end to end with stubbed agents
+(`CLAUDE_BIN=true`) — run it after any plumbing change. Deferred/parked ideas live in
+`knowledge/KIV.md`.

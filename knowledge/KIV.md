@@ -115,3 +115,18 @@ triggered, not baked into a phase.
 **How to apply:** build the kanban primitives against the data model first (done for the
 local markdown backend). When wiring dispatch, expose the kickoff as a standalone
 function and keep all tracker access behind the interface so an adapter can replace it.
+
+---
+
+## Parallel idle orchestrator (deferred — quality of life)
+
+A standing orchestrator process that sits idle and reacts to messages from the kanban
+(ticket state changes) rather than the kanban invoking orchestration logic inline. It would
+let orchestration run in parallel with builders/validators and wake on a queued message.
+
+**Why:** cleaner separation and concurrency; the kanban emits state-change events and the
+orchestrator consumes them asynchronously.
+**How to apply (later):** the orchestration actions (spawn validator on RUNNING_TESTS, route
+verdict, dispatch next ready ticket on completion) stay small and state-driven, so they can be
+lifted out of the kanban scripts into a long-lived listener without changing the state model.
+Not needed now — for now the kanban triggers these actions inline on the transition.
