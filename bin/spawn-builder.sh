@@ -7,7 +7,7 @@ SCRIPT_DIR_SB="$(cd "$(dirname "$0")" && pwd)"
 
 ISSUE=""
 HANDOFF=""
-PORT=""   # assigned later, at the NEEDS_TESTING transition — not at spawn
+PORT=""   # assigned later, allocated when the validator boots — not at spawn
 REPO_ROOT=""
 DEPENDS_ON=""
 FEATURE_NAME=""
@@ -111,7 +111,7 @@ cat > "$WORKTREE_PATH/.claude/settings.json" << SEOF
 SEOF
 
 # Briefing copies are factory context, not product code — exclude them so the
-# clean-worktree gate before NEEDS_TESTING doesn't trip on them and no builder
+# clean-worktree gate before RUNNING_TESTS doesn't trip on them and no builder
 # commits factory files into the product repo.
 mkdir -p "$REPO_ROOT/.git/info"
 for p in HANDOFF.md AGENTS.md modules.json knowledge/ .claude/; do
@@ -154,7 +154,7 @@ KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR_SB/agent-state" "$ISSUE" idle
 
 # Deliver the first instruction through the delegator queue — never raw send-keys.
 KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR_SB/tmux-delegate" "$ISSUE" \
-  "Read HANDOFF.md, AGENTS.md, modules.json, knowledge/lessons.md, and every research doc your ticket links under knowledge/technical/research/ — the planner already researched your stack; read its findings instead of re-researching. Mark started with: kanban-update $ISSUE IN_PROGRESS \"starting\". Then build. Set up your own infra as part of the build (local services, integrations, tools); NEEDS_SETUP is the LAST resort, only for a credential/account/access that only the human holds. Test as you code. When your own tests pass, while still IN_PROGRESS spawn the independent validator: spawn-agent validator-agent \"VALIDATE: $ISSUE — <feature, one line>\" (your test port lands in the ticket frontmatter when it boots). Fix everything its VALIDATION-FAILED lists and re-request until it passes — kanban-update refuses NEEDS_TESTING without a passing verdict; NEEDS_TESTING holds only taste for the user."
+  "Read HANDOFF.md, AGENTS.md, modules.json, knowledge/lessons.md, and every research doc your ticket links under knowledge/technical/research/ — the planner already researched your stack; read its findings instead of re-researching. Your dependencies are already built and merged into your branch's base, so build against the REAL code, not mocks. Mark started: kanban-update $ISSUE IN_PROGRESS \"starting\". Set up your own infra as part of the build; NEEDS_SETUP (kanban-update $ISSUE NEEDS_SETUP \"<exactly what you need and who provides it>\") is the LAST resort, only for a credential/account/access that only the human holds. Test as you code. Fill the ## What was built / How it works / Tests run / Lessons learned sections in kanban/$ISSUE.md, set test_command in its frontmatter, and commit everything on feat/$ISSUE. Then run: kanban-update $ISSUE RUNNING_TESTS \"<summary>\" — the KANBAN spawns your validator automatically (you do NOT spawn it). Stay in this session: when the validator queues VALIDATION-FAILED, fix the defects and run kanban-update $ISSUE RUNNING_TESTS again to re-trigger it. You keep your context across rounds. On a passing verdict the kanban routes the ticket onward; you are done."
 
 KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR_SB/factory-log" task_dispatched issue="$ISSUE" feature="$FEATURE_NAME"
 

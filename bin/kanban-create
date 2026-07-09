@@ -4,7 +4,7 @@
 # A kanban PRIMITIVE. Creates one issue with all the data the architect derives from
 # the roadmap: intent, what to build, success criteria, testing, dependencies on other
 # issues, external-infra needs, and [[backlinks]]. status starts NOT_STARTED; a port is
-# NOT assigned here (it is a testing-phase resource, set at NEEDS_TESTING).
+# NOT assigned here (it is a testing-phase resource, set at NEEDS_USER_TESTING).
 #
 # For each issue dependency it scaffolds an empty contract stub the architect fills, so
 # the dependent issue can build against the interface and mock it.

@@ -6,8 +6,8 @@
 # Verifies, against the real scripts:
 #   handoff-to-planner spawns the planner session + logs the handoff
 #   kanban-create writes tickets + logs ticket_created
-#   kanban-dispatch honors the ready-set (stub edge contract holds a dependent; a filled
-#     contract releases it), creates feat/<issue> worktrees/branches + logs events
+#   kanban-dispatch honors deps-DONE readiness (a dependent is held while its dependency is
+#     unfinished; marking the dependency DONE releases it), creates feat/<issue> worktrees + logs
 #   kanban-update logs task_update
 #   rebase-queue serial-integrates an approved branch onto main and writes the AAR
 # It does NOT test real agent reasoning — only that the system actions fire and are logged.
@@ -79,30 +79,29 @@ echo "3) graph validates (kanban-graph)"
 kanban-graph >/dev/null 2>&1; GRC=$?
 check "kanban-graph exits clean"       '[ "$GRC" -eq 0 ]'
 
-echo "4) dispatch honors the ready-set: stub edge contract holds the dependent (kanban-dispatch)"
+echo "4) dispatch honors deps-DONE readiness: dependent held while its dep is unfinished (kanban-dispatch)"
 kanban-dispatch >/dev/null 2>&1
 check "feat/iss-001-api worktree made (product repo)" 'git -C "$PROJ/product" worktree list | grep -q "feat/iss-001-api"'
-check "iss-002-ui held back (stub contract, dep not DONE)" '! git -C "$PROJ/product" worktree list | grep -q "feat/iss-002-ui"'
+check "iss-002-ui held back (dep not DONE)" '! git -C "$PROJ/product" worktree list | grep -q "feat/iss-002-ui"'
 check "branch_created logged once"     '[ "$(grep -c branch_created "$EVENTS")" -eq 1 ]'
 
-echo "4b) filling the edge contract makes the dependent ticket ready"
-printf '# Contract: iss-002-ui depends on iss-001-api\nGET /items -> 200 [{id, name}]\n' \
-  > "$PROJ/knowledge/contracts/iss-002-ui-iss-001-api.md"
+echo "4b) marking the dependency DONE releases the dependent"
+kanban-update iss-001-api DONE "merged" >/dev/null 2>&1
 kanban-dispatch >/dev/null 2>&1
-check "feat/iss-002-ui worktree made"  'git -C "$PROJ/product" worktree list | grep -q "feat/iss-002-ui"'
+check "feat/iss-002-ui worktree made (dep now DONE)" 'git -C "$PROJ/product" worktree list | grep -q "feat/iss-002-ui"'
 check "task_dispatched logged twice"   '[ "$(grep -c task_dispatched "$EVENTS")" -eq 2 ]'
 
 echo "5) a task reports an update (kanban-update)"
-kanban-update iss-001-api IN_PROGRESS "starting" >/dev/null 2>&1
+kanban-update iss-002-ui IN_PROGRESS "starting" >/dev/null 2>&1
 check "task_update logged"             'grep -q task_update "$EVENTS"'
 
 echo "6) approved ticket integrates serially (rebase-queue → main + AAR)"
-echo feature > "$PROJ/worktrees/iss-001-api/api.txt"
-git -C "$PROJ/worktrees/iss-001-api" add -A
-git -C "$PROJ/worktrees/iss-001-api" commit -qm "feat: api" 2>/dev/null
-rebase-queue iss-001-api >/dev/null 2>&1
-check "branch landed on product main"  'git -C "$PROJ/product" log --oneline 2>/dev/null | grep -q "feat: api"'
-check "AAR written after landing"      '[ -f "$PROJ/kanban/aar/iss-001-api-aar.md" ]'
+echo feature > "$PROJ/worktrees/iss-002-ui/ui.txt"
+git -C "$PROJ/worktrees/iss-002-ui" add -A
+git -C "$PROJ/worktrees/iss-002-ui" commit -qm "feat: ui" 2>/dev/null
+rebase-queue iss-002-ui >/dev/null 2>&1
+check "branch landed on product main"  'git -C "$PROJ/product" log --oneline 2>/dev/null | grep -q "feat: ui"'
+check "AAR written after landing"      '[ -f "$PROJ/kanban/aar/iss-002-ui-aar.md" ]'
 check "rebase lock released"           '[ ! -d "$PROJ/kanban/.rebase-lock" ]'
 
 echo ""

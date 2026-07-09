@@ -41,15 +41,12 @@ fm() { grep "^$2:" "$1" | head -1 | sed "s/^$2:[[:space:]]*//"; }
 DISPATCHED=0; SKIPPED=0
 DISPATCH_LOG="$KANBAN_DIR/dispatch-log.jsonl"
 
-# Concurrency: one builder per independent branch that is ready NOW. The DAG ready-set is
-# the governor; MAX_BUILDERS is only a rate-limit ceiling (frontier sessions freeze at a
-# usage-limit modal when too many run at once). A dependency edge is satisfied when the
-# dep ticket is DONE (merged), or when the edge contract
-# knowledge/contracts/<issue>-<dep>.md is FILLED — a filled contract means the seam is
-# contract-covered and the dependent builds against a mock now. An unfilled stub means
-# the seam is coupled: the ticket waits for its dependency to merge (coupled tickets stay
-# serial; independent branches scale out). Each dispatch pass recomputes the ready-set;
-# the post-merge hook re-runs dispatch as branches land, picking up newly ready tickets.
+# Concurrency: start a builder for every ticket whose dependencies are ALL DONE. Deps are real —
+# a ticket builds on working, merged dependency code (never a mock), so it can actually run and be
+# tested end to end. Dep-free tickets go first; a dependent starts the moment its last dependency
+# finishes. Independent tickets run in parallel under MAX_BUILDERS (a rate-limit ceiling only —
+# frontier sessions freeze at a usage modal when too many run at once). Each dispatch pass recomputes
+# the ready-set; the post-merge hook re-runs dispatch as branches land, starting newly-ready tickets.
 MAX_BUILDERS="${MAX_BUILDERS:-8}"
 active_builders() {   # live builder sessions still working: just-spawned (NOT_STARTED) or IN_PROGRESS
   # A spawned builder occupies a slot from the moment its session exists — counting only
@@ -67,17 +64,13 @@ active_builders() {   # live builder sessions still working: just-spawned (NOT_S
   echo "$n"
 }
 
-edge_satisfied() {   # edge_satisfied <issue> <dep> — dep DONE, or edge contract filled (mockable)
-  local dep_file="$KANBAN_DIR/$2.md" contract="$PROJECT_ROOT/knowledge/contracts/$1-$2.md"
+edge_satisfied() {   # edge_satisfied <issue> <dep> — the dependency must be DONE (built + merged)
+  local dep_file="$KANBAN_DIR/$2.md"
   if [ ! -f "$dep_file" ]; then
     echo "  ⚠ $1 — dependency '$2' has no ticket (dangling; kanban-graph flags it) — not blocking on it" >&2
     return 0
   fi
-  [ "$(grep -m1 '^status:' "$dep_file" | awk '{print $2}')" = "DONE" ] && return 0
-  if [ -f "$contract" ] && ! grep -q 'Fill in the exact shape' "$contract"; then
-    return 0
-  fi
-  return 1
+  [ "$(grep -m1 '^status:' "$dep_file" | awk '{print $2}')" = "DONE" ]
 }
 
 issue_ready() {      # issue_ready <issue> <dependsOn-csv> — every edge satisfied

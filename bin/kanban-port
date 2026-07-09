@@ -3,7 +3,7 @@
 #
 # A kanban PRIMITIVE. Called from the validator spawn path (spawn-agent): a port is a
 # testing-phase resource, picked the moment the validator boots — validation runs inside
-# IN_PROGRESS (shift-left), so waiting until NEEDS_TESTING would be too late and
+# IN_PROGRESS (shift-left), so waiting until NEEDS_USER_TESTING would be too late and
 # allocating at spawn would reserve it for an unknown duration. Idempotent: a ticket
 # that already holds a port keeps it. Prints the port either way.
 set -e

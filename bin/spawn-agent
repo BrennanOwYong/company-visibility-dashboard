@@ -62,7 +62,7 @@ fi
 
 if [ -n "$MSG" ]; then
   # Port-on-boot (shift-left): a VALIDATE kickoff is the moment the ticket's test port
-  # is allocated — validation runs inside IN_PROGRESS, so NEEDS_TESTING is too late and
+  # is allocated — validation runs inside IN_PROGRESS, so NEEDS_USER_TESTING is too late and
   # spawn-time would reserve it for an unknown duration. Builder and validator both read
   # the port from the ticket frontmatter.
   VISSUE=$(printf '%s' "$MSG" | sed -n 's/^VALIDATE:[[:space:]]*\([A-Za-z0-9_-]*\).*/\1/p')
