@@ -35,3 +35,11 @@ builders, workflows) fails until reset. Cheap file inspection by the main sessio
   architecture.md (all reference-able layers). Effective for future dispatches.
 - Wave 0 (wire-mesh, control-settings) dispatched on Sonnet; rate limit had reset; both took
   active turns and self-healed the missing files. Watch: kanban-ui /graph (nodes recolor live).
+
+## Validate/integrate clue (2026-07-10)
+- CLUE: validator ran `kanban-update wire-mesh VALIDATED` (needs_user_test=false) but status was
+  written literally as VALIDATED instead of exec'ing kanban-done -> auto-DONE. The exec line exists
+  in the bin. Root cause not yet isolated; WATCH the next VALIDATED (control-settings/receiver-core)
+  with the re-synced bin. Manually ran kanban-done to unstick + re-synced factory bin -> attempt bin.
+- LESSON: seed-attempt snapshots bin at seed time; later factory bin fixes must be re-synced into
+  live attempts (or attempts should symlink bin). FIX-LATER: seed-attempt should symlink bin, not copy.
