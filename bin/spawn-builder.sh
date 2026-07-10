@@ -70,19 +70,16 @@ cp "$HANDOFF" "$WORKTREE_PATH/HANDOFF.md"
 [ -f "$PROJECT_ROOT/AGENTS.md" ]    && cp "$PROJECT_ROOT/AGENTS.md"    "$WORKTREE_PATH/AGENTS.md"
 [ -f "$PROJECT_ROOT/modules.json" ] && cp "$PROJECT_ROOT/modules.json" "$WORKTREE_PATH/modules.json"
 
-# Copy contract files relevant to this issue — the per-edge contracts, the iface shapes
-# they point to, and the planner's research docs the ticket links. The worktree lives in
-# the PRODUCT repo, so nothing under the factory's knowledge/ is reachable from it.
-if [ -d "$PROJECT_ROOT/knowledge/contracts" ]; then
-  mkdir -p "$WORKTREE_PATH/knowledge/contracts"
-  cp "$PROJECT_ROOT/knowledge/contracts/"*.md "$WORKTREE_PATH/knowledge/contracts/" 2>/dev/null || true
-  [ -d "$PROJECT_ROOT/knowledge/contracts/iface" ] && \
-    cp -r "$PROJECT_ROOT/knowledge/contracts/iface" "$WORKTREE_PATH/knowledge/contracts/iface" 2>/dev/null || true
-fi
-if [ -d "$PROJECT_ROOT/knowledge/technical/research" ]; then
-  mkdir -p "$WORKTREE_PATH/knowledge/technical"
-  cp -r "$PROJECT_ROOT/knowledge/technical/research" "$WORKTREE_PATH/knowledge/technical/research" 2>/dev/null || true
-fi
+# Mirror the knowledge/ layers the ticket's ## References point at into the worktree — the
+# worktree lives in the PRODUCT repo, so nothing under the factory's knowledge/ is reachable
+# otherwise. Copy the layers a ticket links: prd, spec, contracts (+iface), technical
+# (feasibility+research), architecture. (Clue 2026-07-10: earlier only contracts/research were
+# copied, so a builder whose References named knowledge/spec/* or acceptance/* had to copy them
+# itself — friction. Mirror all reference-able layers so every ## References path resolves.)
+for sub in prd spec contracts technical; do
+  [ -d "$PROJECT_ROOT/knowledge/$sub" ] && { mkdir -p "$WORKTREE_PATH/knowledge"; cp -r "$PROJECT_ROOT/knowledge/$sub" "$WORKTREE_PATH/knowledge/$sub" 2>/dev/null || true; }
+done
+[ -f "$PROJECT_ROOT/knowledge/architecture.md" ] && { mkdir -p "$WORKTREE_PATH/knowledge"; cp "$PROJECT_ROOT/knowledge/architecture.md" "$WORKTREE_PATH/knowledge/architecture.md" 2>/dev/null || true; }
 
 # Copy lessons learned if present
 [ -f "$PROJECT_ROOT/knowledge/lessons.md" ] && {

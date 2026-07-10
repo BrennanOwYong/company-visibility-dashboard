@@ -433,6 +433,7 @@ header h1{font-size:19px;font-weight:700;color:#f1f5f9}
   <h1>Kanban</h1>
   <span class="proj">${esc(projectName)}</span>
   <div class="hdr-links">
+    <a class="prd-link" href="/graph">Dependency graph</a>
     <a class="prd-link" href="/prd">Feature list</a>
     <button class="refresh" onclick="location.reload()">↺ Refresh</button>
   </div>
@@ -711,11 +712,175 @@ a.back:hover{background:#1e2433;color:#93c5fd}
 
 // ── HTTP server ───────────────────────────────────────────────────────────────
 
+// ── Dependency graph page ──────────────────────────────────────────────────────
+const STATUS_COLOR = {
+  NOT_STARTED: '#475569', IN_PROGRESS: '#2563eb', NEEDS_SETUP: '#dc2626',
+  RUNNING_TESTS: '#7c3aed', NEEDS_USER_TESTING: '#d97706', DONE: '#059669', COMPLETE: '#059669',
+};
+
+function renderGraphPage() {
+  const projectName = path.basename(PROJECT_ROOT);
+  const gp = path.join(KANBAN_DIR, 'graph.json');
+  const shell = (body) => `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Graph — ${esc(projectName)}</title>
+<script>let __r=null;setInterval(async()=>{try{const x=await fetch('/rev',{cache:'no-store'});const {rev}=await x.json();if(__r===null){__r=rev;return}if(rev!==__r){__r=rev;location.reload()}}catch(e){}},4000);</script>
+<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#e2e8f0;font-size:14px}
+header{padding:16px 28px;border-bottom:1px solid #1e2433;display:flex;align-items:center;gap:14px}
+a.back{color:#7c9eb5;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #2d3748;border-radius:6px;background:#161b27}
+a.back:hover{background:#1e2433;color:#93c5fd}
+.h1{font-size:16px;font-weight:700;color:#f1f5f9}.sub{font-size:12px;color:#475569}
+.legend{display:flex;gap:14px;flex-wrap:wrap;padding:10px 28px;font-size:11px;color:#94a3b8;border-bottom:1px solid #1e2433}
+.legend b{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.wrap{overflow:auto;padding:24px 28px}
+.canvas{position:relative}
+svg.edges{position:absolute;top:0;left:0;pointer-events:none;overflow:visible}
+.node{position:absolute;width:184px;min-height:58px;border-radius:8px;border:1px solid #2d3748;background:#161b27;
+  text-decoration:none;color:#e2e8f0;padding:9px 11px;display:flex;flex-direction:column;gap:5px;z-index:2;transition:transform .08s}
+.node:hover{transform:translateY(-2px);border-color:#4b5f7a}
+.node .nm{font-weight:700;font-size:13px;color:#f1f5f9;line-height:1.15}
+.node .row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.chip{font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;color:#fff}
+.dot{font-size:10px}.ut{color:#d97706}.be{color:#64748b}
+.ring{position:absolute;inset:-3px;border-radius:10px;border:2px dashed #d97706;opacity:.9;pointer-events:none}
+.tip{display:none;position:absolute;left:0;top:100%;margin-top:8px;width:320px;z-index:10;
+  background:#0b1220;border:1px solid #334155;border-radius:8px;padding:11px 13px;box-shadow:0 10px 30px rgba(0,0,0,.5);cursor:default}
+.node:hover .tip{display:block}
+.tip .tt{font-weight:700;color:#f1f5f9;font-size:13px;margin-bottom:6px}
+.tip .kv{font-size:11px;color:#94a3b8;line-height:1.7}.tip .kv b{color:#cbd5e1;font-weight:600}
+.tip .snip{margin-top:7px;font-size:12px;color:#cbd5e1;line-height:1.5;border-top:1px solid #1e2433;padding-top:7px}
+.wavehdr{position:absolute;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#475569}
+.msg{padding:40px 28px;color:#64748b}</style></head><body>
+<header><a class="back" href="/">← Board</a><div><div class="h1">Dependency graph</div><div class="sub">${esc(projectName)} — hover a ticket for its state, click to open it</div></div></header>
+${body}</body></html>`;
+
+  if (!fs.existsSync(gp)) return shell(`<div class="msg">No <code>kanban/graph.json</code> yet. Create tickets (kanban-create) or run <code>kanban-graph</code>.</div>`);
+  let graph; try { graph = JSON.parse(fs.readFileSync(gp, 'utf8')); } catch(e) { return shell(`<div class="msg">graph.json unreadable.</div>`); }
+  const nodes = graph.nodes || [];
+  if (!nodes.length) return shell(`<div class="msg">Graph has no tickets yet.</div>`);
+  const tix = Object.fromEntries(readTickets().map(t => [t.issue, t]));
+
+  // Layout: column per wave (0 leftmost), stacked within a wave.
+  const COLW = 250, ROWH = 108, NW = 184, NH = 58, PADX = 20, PADY = 34;
+  const byWave = {};
+  let maxWave = 0;
+  for (const n of nodes) { const w = (n.wave == null ? 99 : n.wave); (byWave[w] = byWave[w] || []).push(n); if (w !== 99) maxWave = Math.max(maxWave, w); }
+  const pos = {};
+  for (const w of Object.keys(byWave).map(Number).sort((a,b)=>a-b)) {
+    byWave[w].forEach((n, i) => { pos[n.id] = { x: PADX + (w===99?maxWave+1:w) * COLW, y: PADY + 22 + i * ROWH }; });
+  }
+  const maxRows = Math.max(...Object.values(byWave).map(a => a.length));
+  const cw = PADX + (maxWave + 2) * COLW, ch = PADY + 30 + maxRows * ROWH;
+
+  const edgesSvg = (graph.edges || []).map(e => {
+    const a = pos[e.from], b = pos[e.to]; if (!a || !b) return '';
+    const x1 = a.x + NW, y1 = a.y + NH/2, x2 = b.x, y2 = b.y + NH/2;
+    const mx = (x1 + x2) / 2;
+    return `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" fill="none" stroke="#3b4a63" stroke-width="1.6" marker-end="url(#arw)"/>`;
+  }).join('');
+
+  const waveHdrs = Object.keys(byWave).map(Number).sort((a,b)=>a-b).map(w =>
+    `<div class="wavehdr" style="left:${PADX + (w===99?maxWave+1:w)*COLW}px;top:6px">${w===99?'unordered':'wave '+w}</div>`).join('');
+
+  const nodeHtml = nodes.map(n => {
+    const p = pos[n.id]; if (!p) return '';
+    const t = tix[n.id] || {};
+    const col = STATUS_COLOR[n.status] || '#475569';
+    const ut = n.needs_user_test;
+    const ready = n.status === 'NOT_STARTED' && n.ready;
+    const snip = (t.whatBuilt || t.intent || '').slice(0, 200);
+    const deps = (n.requires && n.requires.length) ? n.requires.join(', ') : '(none)';
+    return `<a class="node" href="/ticket/${esc(n.id)}" style="left:${p.x}px;top:${p.y}px">
+      ${ready ? '<span class="ring"></span>' : ''}
+      <span class="nm">${esc(n.id)}</span>
+      <span class="row">
+        <span class="chip" style="background:${col}">${esc(n.status)}</span>
+        <span class="dot ${ut?'ut':'be'}">${ut?'● user-test':'● backend'}</span>
+      </span>
+      <span class="tip">
+        <span class="tt">${esc(t.title || n.title || n.id)}</span>
+        <span class="kv"><b>feature:</b> ${esc(n.feature||'—')} &nbsp; <b>status:</b> ${esc(n.status)}</span><br>
+        <span class="kv"><b>waits on:</b> ${esc(deps)} &nbsp; <b>ready:</b> ${n.ready?'yes':'no'}</span><br>
+        <span class="kv"><b>user test:</b> ${ut?'yes':'no'}${t.port?` &nbsp; <b>port:</b> ${esc(t.port)}`:''}</span>
+        ${snip ? `<span class="snip">${esc(snip)}${snip.length>=200?'…':''}</span>` : ''}
+      </span>
+    </a>`;
+  }).join('');
+
+  const counts = nodes.reduce((a,n)=>{a[n.status]=(a[n.status]||0)+1;return a;},{});
+  const legend = `<div class="legend">` +
+    Object.entries(STATUS_COLOR).filter(([k])=>k!=='COMPLETE').map(([k,c])=>`<span><b style="background:${c}"></b>${k}${counts[k]?' ('+counts[k]+')':''}</span>`).join('') +
+    `<span><span class="ring" style="position:static;display:inline-block;width:10px;height:10px;margin-right:5px"></span>ready (all prereqs DONE)</span></div>`;
+
+  return shell(`${legend}<div class="wrap"><div class="canvas" style="width:${cw}px;height:${ch}px">
+    <svg class="edges" width="${cw}" height="${ch}"><defs><marker id="arw" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#4b5f7a"/></marker></defs>${edgesSvg}</svg>
+    ${waveHdrs}${nodeHtml}</div></div>`);
+}
+
+// ── Single ticket page ─────────────────────────────────────────────────────────
+function renderTicketPage(id) {
+  const projectName = path.basename(PROJECT_ROOT);
+  const fp = path.join(KANBAN_DIR, id.replace(/[^a-zA-Z0-9_-]/g, '') + '.md');
+  const shell = (body) => `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(id)} — ${esc(projectName)}</title>
+<script>let __r=null;setInterval(async()=>{try{const x=await fetch('/rev',{cache:'no-store'});const {rev}=await x.json();if(__r===null){__r=rev;return}if(rev!==__r){__r=rev;location.reload()}}catch(e){}},4000);</script>
+<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#e2e8f0;font-size:14px}
+header{padding:16px 28px;border-bottom:1px solid #1e2433;display:flex;align-items:center;gap:12px}
+a.back{color:#7c9eb5;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #2d3748;border-radius:6px;background:#161b27}a.back:hover{background:#1e2433;color:#93c5fd}
+.body{max-width:900px;margin:0 auto;padding:26px 28px}
+.fm{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;background:#161b27;border:1px solid #1e2433;border-radius:8px;padding:14px 16px;margin-bottom:20px;font-size:12px}
+.fm .k{color:#64748b;font-weight:600}.fm .v{color:#cbd5e1;word-break:break-word}
+h2{font-size:15px;color:#f1f5f9;margin:22px 0 8px;border-bottom:1px solid #1e2433;padding-bottom:5px}
+h3{font-size:13px;color:#cbd5e1;margin:14px 0 6px}
+p{color:#94a3b8;line-height:1.65;margin:6px 0}
+li{color:#94a3b8;line-height:1.6;margin-left:20px}
+a.ref{color:#7dd3fc}code,pre{background:#0b1220;border:1px solid #1e2433;border-radius:5px;font-family:'SF Mono',monospace;font-size:12px;color:#a5d6ff}
+pre{padding:11px 13px;overflow-x:auto;margin:8px 0}code{padding:2px 5px}</style></head><body>
+<header><a class="back" href="/graph">← Graph</a><a class="back" href="/">Board</a></header><div class="body">${body}</div></body></html>`;
+
+  if (!fs.existsSync(fp)) return shell(`<p>No ticket <code>${esc(id)}</code>.</p>`);
+  const raw = fs.readFileSync(fp, 'utf8');
+  const fm = parseFrontmatter(raw);
+  const fmHtml = Object.entries(fm).filter(([,v])=>String(v).trim()!=='').map(([k,v]) =>
+    `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>`).join('');
+  const bodyMd = raw.replace(/^---\n[\s\S]*?\n---\n?/, '');
+
+  // Lightweight markdown render (headings, lists, code fences).
+  const lines = bodyMd.split('\n'); let out = ''; let inPre = false;
+  for (const ln of lines) {
+    if (ln.startsWith('```')) { out += inPre ? '</pre>' : '<pre>'; inPre = !inPre; continue; }
+    if (inPre) { out += esc(ln) + '\n'; continue; }
+    if (ln.startsWith('## ')) out += `<h2>${esc(ln.slice(3))}</h2>`;
+    else if (ln.startsWith('### ')) out += `<h3>${esc(ln.slice(4))}</h3>`;
+    else if (/^\s*-\s/.test(ln)) {
+      let item = esc(ln.replace(/^\s*-\s/, ''));
+      item = item.replace(/(knowledge\/[^\s,]+|kanban\/[^\s,]+)/g, '<a class="ref" href="#">$1</a>');
+      out += `<li>${item}</li>`;
+    }
+    else if (ln.trim() === '') out += '';
+    else out += `<p>${esc(ln)}</p>`;
+  }
+  if (inPre) out += '</pre>';
+  return shell(`<div class="fm">${fmHtml}</div>${out}`);
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/') {
     const tickets = readTickets();
     res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
     res.end(renderPage(tickets));
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/graph') {
+    res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
+    res.end(renderGraphPage());
+    return;
+  }
+
+  if (req.method === 'GET' && req.url.startsWith('/ticket/')) {
+    const id = decodeURIComponent(req.url.slice('/ticket/'.length).split('?')[0]);
+    res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
+    res.end(renderTicketPage(id));
     return;
   }
 
