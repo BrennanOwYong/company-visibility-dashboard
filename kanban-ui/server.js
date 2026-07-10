@@ -10,6 +10,22 @@ const UI_PORT = process.env.KANBAN_UI_PORT || 2999;
 const PROJECT_ROOT = process.env.KANBAN_PROJECT_ROOT || process.cwd();
 const KANBAN_DIR = path.join(PROJECT_ROOT, 'kanban');
 const KNOWLEDGE_DIR = path.join(PROJECT_ROOT, 'knowledge');
+
+// ── Live push (Server-Sent Events): the server watches the kanban dir and PUSHES a "changed"
+// signal to every open browser the moment a ticket file / graph.json / card changes. No client
+// polling, no periodic reload — the page updates only when state actually changes.
+const sseClients = new Set();
+let sseTimer = null;
+function sseBroadcast() { for (const r of sseClients) { try { r.write('data: changed\n\n'); } catch (e) {} } }
+function watchForPush(dir) {
+  try { fs.watch(dir, { persistent: false }, () => { clearTimeout(sseTimer); sseTimer = setTimeout(sseBroadcast, 250); }); } catch (e) {}
+}
+watchForPush(KANBAN_DIR);
+{ const cd = path.join(KANBAN_DIR, 'user-test-cards'); if (fs.existsSync(cd)) watchForPush(cd); }
+
+// Shared client script: subscribe to the push stream. A page may define window.__onLive to update
+// in place (the graph does); otherwise it reloads — but ONLY on a real change, never on a timer.
+const LIVE_SCRIPT = `<script>try{const es=new EventSource('/events');es.onmessage=function(){if(window.__onLive){window.__onLive()}else{location.reload()}};es.onerror=function(){};}catch(e){}</script>`;
 const PORTS_FILE = path.join(KANBAN_DIR, '.ports.json');
 
 // ── Port registry ────────────────────────────────────────────────────────────
@@ -326,24 +342,7 @@ function renderPage(tickets) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Kanban — ${esc(projectName)}</title>
-<script>
-// Live board: poll a lightweight revision token every 5s and reload ONLY when a ticket
-// file actually changed — a static board never reloads. Skips the reload while the user
-// is mid-interaction (feedback form open or text selected) so it can't eat input.
-let __rev = null;
-setInterval(async () => {
-  try {
-    const r = await fetch('/rev', {cache: 'no-store'});
-    const { rev } = await r.json();
-    if (__rev === null) { __rev = rev; return; }
-    if (rev === __rev) return;
-    const busy = document.querySelector('.feedback-form[style*="block"] textarea, .fb-input:focus') || String(getSelection()).length;
-    if (busy) return;            // defer until the user is done; token stays stale, reload next tick
-    __rev = rev;
-    location.reload();
-  } catch (e) { /* server momentarily down — try again next tick */ }
-}, 5000);
-</script>
+${LIVE_SCRIPT}
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#e2e8f0;min-height:100vh;font-size:14px}
@@ -723,35 +722,39 @@ function renderGraphPage() {
   const gp = path.join(KANBAN_DIR, 'graph.json');
   const shell = (body) => `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Graph — ${esc(projectName)}</title>
-<script>let __r=null;setInterval(async()=>{try{const x=await fetch('/rev',{cache:'no-store'});const {rev}=await x.json();if(__r===null){__r=rev;return}if(rev!==__r){__r=rev;location.reload()}}catch(e){}},4000);</script>
-<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#e2e8f0;font-size:14px}
-header{padding:16px 28px;border-bottom:1px solid #1e2433;display:flex;align-items:center;gap:14px}
+${LIVE_SCRIPT}
+<style>*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#e2e8f0;font-size:14px;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+header{padding:14px 28px;border-bottom:1px solid #1e2433;display:flex;align-items:center;gap:14px;flex-shrink:0}
 a.back{color:#7c9eb5;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #2d3748;border-radius:6px;background:#161b27}
 a.back:hover{background:#1e2433;color:#93c5fd}
 .h1{font-size:16px;font-weight:700;color:#f1f5f9}.sub{font-size:12px;color:#475569}
-.legend{display:flex;gap:14px;flex-wrap:wrap;padding:10px 28px;font-size:11px;color:#94a3b8;border-bottom:1px solid #1e2433}
+.legend{display:flex;gap:14px;flex-wrap:wrap;padding:9px 28px;font-size:11px;color:#94a3b8;border-bottom:1px solid #1e2433;flex-shrink:0}
 .legend b{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:middle}
-.wrap{overflow:auto;padding:24px 28px}
+.wrap{flex:1;min-height:0;overflow:auto;padding:22px 28px}
 .canvas{position:relative}
 svg.edges{position:absolute;top:0;left:0;pointer-events:none;overflow:visible}
 .node{position:absolute;width:184px;min-height:58px;border-radius:8px;border:1px solid #2d3748;background:#161b27;
-  text-decoration:none;color:#e2e8f0;padding:9px 11px;display:flex;flex-direction:column;gap:5px;z-index:2;transition:transform .08s}
-.node:hover{transform:translateY(-2px);border-color:#4b5f7a}
+  text-decoration:none;color:#e2e8f0;padding:9px 11px;display:flex;flex-direction:column;gap:5px;z-index:2;transition:transform .08s,border-color .08s}
+.node:hover{transform:translateY(-2px);border-color:#4b5f7a;z-index:60}
 .node .nm{font-weight:700;font-size:13px;color:#f1f5f9;line-height:1.15}
 .node .row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .chip{font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;color:#fff}
 .dot{font-size:10px}.ut{color:#d97706}.be{color:#64748b}
 .ring{position:absolute;inset:-3px;border-radius:10px;border:2px dashed #d97706;opacity:.9;pointer-events:none}
-.tip{display:none;position:absolute;left:0;top:100%;margin-top:8px;width:320px;z-index:10;
-  background:#0b1220;border:1px solid #334155;border-radius:8px;padding:11px 13px;box-shadow:0 10px 30px rgba(0,0,0,.5);cursor:default}
-.node:hover .tip{display:block}
-.tip .tt{font-weight:700;color:#f1f5f9;font-size:13px;margin-bottom:6px}
-.tip .kv{font-size:11px;color:#94a3b8;line-height:1.7}.tip .kv b{color:#cbd5e1;font-weight:600}
-.tip .snip{margin-top:7px;font-size:12px;color:#cbd5e1;line-height:1.5;border-top:1px solid #1e2433;padding-top:7px}
+.tbtn{margin-top:2px;font-size:11px;font-weight:700;background:#0369a1;color:#fff;border:none;border-radius:5px;padding:4px 8px;cursor:pointer;text-decoration:none;display:inline-block}
+.tbtn:hover{background:#0284c7}
+/* body-level tooltip: fixed to the viewport, max z-index — never covered, never expands the scroll area */
+#tip{position:fixed;display:none;z-index:2147483647;width:330px;max-width:46vw;pointer-events:none;
+  background:#0b1220;border:1px solid #334155;border-radius:8px;padding:11px 13px;box-shadow:0 12px 34px rgba(0,0,0,.6)}
+#tip .tt{font-weight:700;color:#f1f5f9;font-size:13px;margin-bottom:6px}
+#tip .kv{font-size:11px;color:#94a3b8;line-height:1.75}#tip .kv b{color:#cbd5e1;font-weight:600}
+#tip .snip{margin-top:7px;font-size:12px;color:#cbd5e1;line-height:1.5;border-top:1px solid #1e2433;padding-top:7px}
 .wavehdr{position:absolute;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#475569}
 .msg{padding:40px 28px;color:#64748b}</style></head><body>
 <header><a class="back" href="/">← Board</a><div><div class="h1">Dependency graph</div><div class="sub">${esc(projectName)} — hover a ticket for its state, click to open it</div></div></header>
-${body}</body></html>`;
+${body}<div id="tip"></div></body></html>`;
 
   if (!fs.existsSync(gp)) return shell(`<div class="msg">No <code>kanban/graph.json</code> yet. Create tickets (kanban-create) or run <code>kanban-graph</code>.</div>`);
   let graph; try { graph = JSON.parse(fs.readFileSync(gp, 'utf8')); } catch(e) { return shell(`<div class="msg">graph.json unreadable.</div>`); }
@@ -781,28 +784,33 @@ ${body}</body></html>`;
   const waveHdrs = Object.keys(byWave).map(Number).sort((a,b)=>a-b).map(w =>
     `<div class="wavehdr" style="left:${PADX + (w===99?maxWave+1:w)*COLW}px;top:6px">${w===99?'unordered':'wave '+w}</div>`).join('');
 
+  const tipHtml = (n, t) => {
+    const ut = n.needs_user_test;
+    const deps = (n.requires && n.requires.length) ? n.requires.join(', ') : '(none)';
+    const snip = (t.whatBuilt || t.intent || '').slice(0, 220);
+    return `<span class="tt">${esc(t.title || n.title || n.id)}</span>`
+      + `<span class="kv"><b>feature:</b> ${esc(n.feature||'—')} &nbsp; <b>status:</b> ${esc(n.status)}</span><br>`
+      + `<span class="kv"><b>waits on:</b> ${esc(deps)} &nbsp; <b>ready:</b> ${n.ready?'yes':'no'}</span><br>`
+      + `<span class="kv"><b>user test:</b> ${ut?'yes':'no'}${t.port?` &nbsp; <b>port:</b> ${esc(t.port)}`:''}</span>`
+      + (snip ? `<span class="snip">${esc(snip)}${snip.length>=220?'…':''}</span>` : '');
+  };
   const nodeHtml = nodes.map(n => {
     const p = pos[n.id]; if (!p) return '';
     const t = tix[n.id] || {};
     const col = STATUS_COLOR[n.status] || '#475569';
     const ut = n.needs_user_test;
     const ready = n.status === 'NOT_STARTED' && n.ready;
-    const snip = (t.whatBuilt || t.intent || '').slice(0, 200);
-    const deps = (n.requires && n.requires.length) ? n.requires.join(', ') : '(none)';
-    return `<a class="node" href="/ticket/${esc(n.id)}" style="left:${p.x}px;top:${p.y}px">
-      ${ready ? '<span class="ring"></span>' : ''}
+    const testable = ut && n.status === 'NEEDS_USER_TESTING';
+    const tb = JSON.stringify(t.test_command || '');
+    return `<a class="node" id="nd-${esc(n.id)}" data-id="${esc(n.id)}" href="/ticket/${esc(n.id)}"
+      data-tip="${esc(tipHtml(n, t)).replace(/"/g,'&quot;')}" style="left:${p.x}px;top:${p.y}px">
+      <span class="ring" style="${ready?'':'display:none'}"></span>
       <span class="nm">${esc(n.id)}</span>
       <span class="row">
         <span class="chip" style="background:${col}">${esc(n.status)}</span>
         <span class="dot ${ut?'ut':'be'}">${ut?'● user-test':'● backend'}</span>
       </span>
-      <span class="tip">
-        <span class="tt">${esc(t.title || n.title || n.id)}</span>
-        <span class="kv"><b>feature:</b> ${esc(n.feature||'—')} &nbsp; <b>status:</b> ${esc(n.status)}</span><br>
-        <span class="kv"><b>waits on:</b> ${esc(deps)} &nbsp; <b>ready:</b> ${n.ready?'yes':'no'}</span><br>
-        <span class="kv"><b>user test:</b> ${ut?'yes':'no'}${t.port?` &nbsp; <b>port:</b> ${esc(t.port)}`:''}</span>
-        ${snip ? `<span class="snip">${esc(snip)}${snip.length>=200?'…':''}</span>` : ''}
-      </span>
+      <span class="tbtn-slot">${testable ? `<button class="tbtn" onclick="event.preventDefault();event.stopPropagation();testFeature('${esc(n.id)}',${tb})">▶ Test</button>` : ''}</span>
     </a>`;
   }).join('');
 
@@ -811,9 +819,40 @@ ${body}</body></html>`;
     Object.entries(STATUS_COLOR).filter(([k])=>k!=='COMPLETE').map(([k,c])=>`<span><b style="background:${c}"></b>${k}${counts[k]?' ('+counts[k]+')':''}</span>`).join('') +
     `<span><span class="ring" style="position:static;display:inline-block;width:10px;height:10px;margin-right:5px"></span>ready (all prereqs DONE)</span></div>`;
 
+  const graphScript = `<script>
+(function(){
+  var tip=document.getElementById('tip');
+  function showTip(el,e){ tip.innerHTML=el.getAttribute('data-tip'); tip.style.display='block';
+    var w=tip.offsetWidth,h=tip.offsetHeight,x=e.clientX+16,y=e.clientY+16;
+    if(x+w>innerWidth-8)x=e.clientX-w-16; if(y+h>innerHeight-8)y=innerHeight-h-8; if(y<8)y=8;
+    tip.style.left=x+'px'; tip.style.top=y+'px'; }
+  document.addEventListener('mouseover',function(e){var n=e.target.closest('.node'); if(n)showTip(n,e);});
+  document.addEventListener('mousemove',function(e){var n=e.target.closest('.node'); if(n&&tip.style.display==='block')showTip(n,e);});
+  document.addEventListener('mouseout',function(e){var n=e.target.closest('.node'); if(n&&!n.contains(e.relatedTarget))tip.style.display='none';});
+  var COL=${JSON.stringify(STATUS_COLOR)};
+  // In-place live update (no reload): re-fetch node state and repaint chips/rings/test buttons.
+  window.__onLive=function(){ fetch('/state.json',{cache:'no-store'}).then(function(r){return r.json()}).then(function(g){
+    (g.nodes||[]).forEach(function(n){ var el=document.getElementById('nd-'+n.id); if(!el)return;
+      var chip=el.querySelector('.chip'); if(chip){chip.textContent=n.status; chip.style.background=COL[n.status]||'#475569';}
+      var ring=el.querySelector('.ring'); if(ring)ring.style.display=(n.status==='NOT_STARTED'&&n.ready)?'block':'none';
+      var slot=el.querySelector('.tbtn-slot');
+      if(slot){ var want=n.needs_user_test&&n.status==='NEEDS_USER_TESTING';
+        if(want&&!slot.firstChild){var b=document.createElement('button');b.className='tbtn';b.textContent='▶ Test';
+          b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();testFeature(n.id,n.test_command||'');};slot.appendChild(b);}
+        else if(!want&&slot.firstChild){slot.innerHTML='';} }
+    });
+  }).catch(function(){}); };
+})();
+function testFeature(id,cmd){
+  if(!confirm('Set up the test environment for "'+id+'" and open it?'))return;
+  fetch('/launch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issue:id,test_command:cmd})})
+    .then(function(r){return r.json()}).then(function(d){ if(d&&d.url){window.open(d.url,'_blank')} else {alert(d&&d.message?d.message:'Launch requested — check the ticket.');} })
+    .catch(function(){alert('Launch failed.');});
+}
+</script>`;
   return shell(`${legend}<div class="wrap"><div class="canvas" style="width:${cw}px;height:${ch}px">
     <svg class="edges" width="${cw}" height="${ch}"><defs><marker id="arw" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#4b5f7a"/></marker></defs>${edgesSvg}</svg>
-    ${waveHdrs}${nodeHtml}</div></div>`);
+    ${waveHdrs}${nodeHtml}</div></div>${graphScript}`);
 }
 
 // ── Single ticket page ─────────────────────────────────────────────────────────
@@ -822,7 +861,7 @@ function renderTicketPage(id) {
   const fp = path.join(KANBAN_DIR, id.replace(/[^a-zA-Z0-9_-]/g, '') + '.md');
   const shell = (body) => `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(id)} — ${esc(projectName)}</title>
-<script>let __r=null;setInterval(async()=>{try{const x=await fetch('/rev',{cache:'no-store'});const {rev}=await x.json();if(__r===null){__r=rev;return}if(rev!==__r){__r=rev;location.reload()}}catch(e){}},4000);</script>
+${LIVE_SCRIPT}
 <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#e2e8f0;font-size:14px}
 header{padding:16px 28px;border-bottom:1px solid #1e2433;display:flex;align-items:center;gap:12px}
 a.back{color:#7c9eb5;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #2d3748;border-radius:6px;background:#161b27}a.back:hover{background:#1e2433;color:#93c5fd}
@@ -860,7 +899,16 @@ pre{padding:11px 13px;overflow-x:auto;margin:8px 0}code{padding:2px 5px}</style>
     else out += `<p>${esc(ln)}</p>`;
   }
   if (inPre) out += '</pre>';
-  return shell(`<div class="fm">${fmHtml}</div>${out}`);
+  // Test affordance: a user-test ticket that has passed validation (NEEDS_USER_TESTING) gets a
+  // one-click Test button that sets up its environment via /launch.
+  const nut = (fm.needs_user_test || 'true').trim() !== 'false';
+  const testable = nut && (fm.status || '').trim() === 'NEEDS_USER_TESTING';
+  const testBar = testable
+    ? `<div style="margin:0 0 18px"><button onclick="testFeature('${esc(id)}',${JSON.stringify(fm.test_command||'')})" style="font-size:13px;font-weight:700;background:#0369a1;color:#fff;border:none;border-radius:6px;padding:9px 16px;cursor:pointer">▶ Test this feature</button>
+       <span style="font-size:11px;color:#64748b;margin-left:10px">validated — only your taste remains</span></div>
+       <script>function testFeature(id,cmd){if(!confirm('Set up the test environment for "'+id+'" and open it?'))return;fetch('/launch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issue:id,test_command:cmd})}).then(function(r){return r.json()}).then(function(d){if(d&&d.url){window.open(d.url,'_blank')}else{alert(d&&d.message?d.message:'Launch requested.')}}).catch(function(){alert('Launch failed.')});}</script>`
+    : '';
+  return shell(`<div class="fm">${fmHtml}</div>${testBar}${out}`);
 }
 
 const server = http.createServer((req, res) => {
@@ -874,6 +922,29 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/graph') {
     res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
     res.end(renderGraphPage());
+    return;
+  }
+
+  // SSE push: the server holds this open and writes "changed" whenever the kanban dir changes.
+  if (req.method === 'GET' && req.url === '/events') {
+    res.writeHead(200, {'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive'});
+    res.write('retry: 3000\n\n');
+    sseClients.add(res);
+    req.on('close', () => sseClients.delete(res));
+    return;
+  }
+
+  // Lightweight graph state for in-place updates (no full-page reload).
+  if (req.method === 'GET' && req.url === '/state.json') {
+    let nodes = [];
+    try {
+      const g = JSON.parse(fs.readFileSync(path.join(KANBAN_DIR, 'graph.json'), 'utf8'));
+      const tix = Object.fromEntries(readTickets().map(t => [t.issue, t]));
+      nodes = (g.nodes || []).map(n => ({ id: n.id, status: n.status, ready: n.ready,
+        needs_user_test: n.needs_user_test, test_command: (tix[n.id] || {}).test_command || '' }));
+    } catch (e) {}
+    res.writeHead(200, {'Content-Type': 'application/json', 'Cache-Control': 'no-store'});
+    res.end(JSON.stringify({ nodes }));
     return;
   }
 
