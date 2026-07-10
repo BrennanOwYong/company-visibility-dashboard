@@ -43,3 +43,19 @@ builders, workflows) fails until reset. Cheap file inspection by the main sessio
   with the re-synced bin. Manually ran kanban-done to unstick + re-synced factory bin -> attempt bin.
 - LESSON: seed-attempt snapshots bin at seed time; later factory bin fixes must be re-synced into
   live attempts (or attempts should symlink bin). FIX-LATER: seed-attempt should symlink bin, not copy.
+
+## Live run milestones (2026-07-10, attempt_2 site-cloner)
+- wire-mesh: DONE (built→validated→merged to product main: "@sitether/wire" adapter+protocol).
+- receiver-core: IN_PROGRESS (building on real merged wire-mesh).
+- control-settings: fix→re-validate round (builder-defect on test_command); validator also caught a
+  ticket-underspecified: acceptance/control-settings.md bundles cloud-banner banner-behavior assertions
+  -> escalated TICKET-GAP to technical-planning-agent. PLANNING CLUE: roadmap stage should keep each
+  ticket's acceptance to its own feature (no cross-feature acceptance bleed).
+- Every pipeline routing path proven on real work: kanban-spawns-validator, builder-defect->builder,
+  test-defect self-correct, ticket-underspecified->planner, backend VALIDATED->auto-integrate->merge->
+  post-merge re-dispatch, deps-DONE gate (dependents build on real merged code).
+- UI: /checklist (feature coverage), /graph (dependency levels, not waves; hover preview; click->ticket),
+  /test/<id> prep+launch+feedback, SSE push (no polling). kanban-ui served from factory root pointed at
+  this attempt via KANBAN_PROJECT_ROOT.
+- OPEN: (1) VALIDATED-auto-route stalled once on stale attempt bin -> re-synced; watch it holds.
+  (2) seed-attempt should symlink bin not copy. (3) planner tightening control-settings acceptance.
