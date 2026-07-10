@@ -917,7 +917,10 @@ async function verdictReport(issue){
   if(await postVerdict({issue,text}))document.getElementById('vd-text').disabled=true;
 }
 </script>` : '';
-  return shell(`<div class="fm">${fmHtml}</div>${testBar}${feedbackBar}${out}`);
+  const featLink = fm.feature
+    ? `<div style="margin:0 0 16px"><a class="back" href="/prd#${esc(fm.feature)}" style="color:#7dd3fc">📄 ${esc(fm.feature)} — feature PRD (why/goal/user flow) ↗</a></div>`
+    : '';
+  return shell(`${featLink}<div class="fm">${fmHtml}</div>${testBar}${feedbackBar}${out}`);
 }
 
 // ── Checklist page: product coverage — every feature and flow vs its tickets ──
