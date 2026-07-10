@@ -2,7 +2,7 @@
 // kanban-graph [--json]
 //
 // A kanban PRIMITIVE. Reads kanban/*.md and reports the dependency graph the architect
-// built from the roadmap: build waves (what to build and when), dependency cycles,
+// built from the roadmap: dependency levels (each ticket starts the moment its prerequisites are DONE), dependency cycles,
 // dangling dependencies, and unresolved external-infra needs. Lets the architect verify
 // the roadmap it just created before anything is dispatched.
 
@@ -118,11 +118,11 @@ console.log('\n━━━━━━━━━━━━━━━━━━━━━�
 console.log(`KANBAN GRAPH — ${path.basename(root)}  (${ids.length} issues)`);
 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-console.log('\n── BUILD WAVES (what to build and when) ──────────────────────');
-console.log('Issues in the same wave have no dependency between them — build in parallel.');
+console.log('\n── DEPENDENCY LEVELS — a ticket starts the moment ALL its prerequisites are DONE (never batched) ──');
+console.log('Level = longest prerequisite chain. Level 0 = ready now. Same-level issues share no dependency and can run in parallel, but each starts as soon as its own prerequisites complete.');
 const waveNums = Object.keys(waves).map(Number).sort((a, b) => a - b);
 for (const w of waveNums) {
-  console.log(`\n  Wave ${w}`);
+  console.log(`\n  Level ${w}`);
   for (const id of waves[w]) {
     const it = issues[id];
     const deps = it.dependsOn.length ? `  depends:[${it.dependsOn.join(', ')}]` : '';

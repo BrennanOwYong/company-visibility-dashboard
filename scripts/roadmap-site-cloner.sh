@@ -84,7 +84,7 @@ kanban-graph --emit 2>/dev/null || true
 echo "── build-plan.md ──"
 {
   echo "# Build plan — cloud-site-cloner"; echo
-  echo "Dependency-ordered; a ticket starts only when ALL its prerequisites are DONE (real merged code)."; echo
-  echo '```'; kanban-graph 2>/dev/null | sed -n '/BUILD WAVES/,/EXTERNAL INFRA/p'; echo '```'
+  echo "Dependency levels, not batches: each ticket starts the moment ALL its prerequisites are DONE (real merged code). Dispatch re-runs on every merge, so tickets start as soon as prerequisites complete — nothing waits for a level to finish."; echo
+  echo '```'; kanban-graph 2>/dev/null | sed -n '/DEPENDENCY LEVELS/,/EXTERNAL INFRA/p'; echo '```'
 } > "$A/knowledge/build-plan.md"
 echo "  wrote knowledge/build-plan.md"

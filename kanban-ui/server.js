@@ -130,6 +130,7 @@ function readTickets() {
         feature: fm.feature || '',
         title: fm.title || '',
         status: fm.status || 'NOT_STARTED',
+        needs_user_test: (fm.needs_user_test || 'true').trim() !== 'false',
         port: fm.port || '',
         test_command: fm.test_command || '',
         dependsOn: fm.dependsOn || '',
@@ -168,8 +169,9 @@ function renderDeps(raw, allTickets) {
 }
 
 // context: 'review' | 'complete' | 'other'
-function renderTestCardBlock(card, test_command, feature, issue, context) {
+function renderTestCardBlock(card, test_command, feature, issue, context, needsUserTest) {
   if (context === 'other') return '';
+  const nut = needsUserTest !== false;
 
   const featureLink = feature
     ? `<a class="tc-feature-link" href="/prd#${esc(feature)}">${esc(feature)} ↗</a>` : '';
@@ -190,10 +192,10 @@ function renderTestCardBlock(card, test_command, feature, issue, context) {
   // No card yet — simple button layout
   if (!card) {
     if (!showTestBtn && !showFeedbackBtn) return '';
-    const testBtn = (showTestBtn && test_command)
-      ? `<button class="launch-btn" onclick="launchAndReveal(this,'${esc(issue)}',${JSON.stringify(test_command)})">▶ Test this feature</button>`
+    const testBtn = (showTestBtn && nut)
+      ? `<a class="launch-btn" href="/test/${esc(issue)}">▶ Test this feature</a>`
       : '';
-    const fbBtn = (showFeedbackBtn && !test_command)
+    const fbBtn = showFeedbackBtn
       ? `<button class="launch-btn launch-plain" onclick="revealFeedback('${esc(issue)}')">Give feedback</button>`
       : '';
     if (!testBtn && !fbBtn) return '';
@@ -215,10 +217,10 @@ function renderTestCardBlock(card, test_command, feature, issue, context) {
        <div class="tc-prompt">↳ What's your first impression — good or bad?</div>
        <div class="tc-prompt">↳ Would someone who's never seen this know what to do?</div>`;
 
-  const testBtn = (showTestBtn && test_command)
-    ? `<button class="launch-btn" onclick="launchAndReveal(this,'${esc(issue)}',${JSON.stringify(test_command)})">▶ Test this feature</button>`
+  const testBtn = (showTestBtn && nut)
+    ? `<a class="launch-btn" href="/test/${esc(issue)}">▶ Test this feature</a>`
     : '';
-  const fbBtn = (showFeedbackBtn && !test_command)
+  const fbBtn = showFeedbackBtn
     ? `<button class="launch-btn launch-plain" onclick="revealFeedback('${esc(issue)}')">Give feedback</button>`
     : '';
 
@@ -259,7 +261,7 @@ function renderTicketCard(t, context, allTickets) {
     ${desc}
     ${renderDeps(t.dependsOn, allTickets)}
     ${last}
-    ${renderTestCardBlock(t.testCard, t.test_command, t.feature, t.issue, context)}
+    ${renderTestCardBlock(t.testCard, t.test_command, t.feature, t.issue, context, t.needs_user_test)}
   </div>`;
 }
 
@@ -271,10 +273,10 @@ function renderPage(tickets) {
   const unstarted    = tickets.filter(t => t.status === 'NOT_STARTED');
   const inProgress   = tickets.filter(t => t.status === 'IN_PROGRESS');
   const blocked      = tickets.filter(t => t.status === 'NEEDS_SETUP');
-  const needsReview  = tickets.filter(t => t.status === 'NEEDS_TESTING');
+  const needsReview  = tickets.filter(t => t.status === 'NEEDS_TESTING' || t.status === 'NEEDS_USER_TESTING');
   const complete     = tickets.filter(t => t.status === 'DONE' || t.status === 'COMPLETE');
   // Anything else → in-progress
-  const unknown      = tickets.filter(t => !['NOT_STARTED','IN_PROGRESS','NEEDS_SETUP','NEEDS_TESTING','DONE','COMPLETE'].includes(t.status));
+  const unknown      = tickets.filter(t => !['NOT_STARTED','IN_PROGRESS','NEEDS_SETUP','NEEDS_TESTING','NEEDS_USER_TESTING','DONE','COMPLETE'].includes(t.status));
 
   const allInProgress = [...inProgress, ...unknown];
 
@@ -434,6 +436,7 @@ header h1{font-size:19px;font-weight:700;color:#f1f5f9}
   <div class="hdr-links">
     <a class="prd-link" href="/graph">Dependency graph</a>
     <a class="prd-link" href="/prd">Feature list</a>
+    <a class="prd-link" href="/checklist">Checklist</a>
     <button class="refresh" onclick="location.reload()">↺ Refresh</button>
   </div>
 </header>
@@ -459,38 +462,6 @@ function toggleBlockedCol(hdr) {
     paneBlocked.style.display = 'none';
     paneReview.style.display  = '';
   }
-}
-
-// Launch a feature test — server picks a fresh port
-async function launchAndReveal(btn, issue, cmd) {
-  btn.disabled = true;
-  btn.textContent = '⏳ Launching…';
-  try {
-    const r = await fetch('/launch', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({command: cmd, issue}),
-    });
-    const j = await r.json();
-    if (j.ok) {
-      btn.textContent = '✓ Launched';
-      if (j.url) {
-        const link = document.createElement('a');
-        link.href = j.url;
-        link.target = '_blank';
-        link.className = 'launch-link';
-        link.textContent = 'Open → ' + j.url;
-        btn.parentNode.appendChild(link);
-      }
-    } else {
-      btn.disabled = false;
-      btn.textContent = '▶ Test this feature';
-    }
-  } catch(e) {
-    btn.disabled = false;
-    btn.textContent = '▶ Test this feature';
-  }
-  revealFeedback(issue);
 }
 
 function revealFeedback(issue) {
@@ -571,14 +542,16 @@ function parseProductPrd(text, issuesByFeature) {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) continue;
     const body = nl === -1 ? '' : sec.slice(nl + 1);
     const grab = (label) => ((body.match(new RegExp(`\\*\\*${label}[^*]*\\*\\*:?\\s*\\n?([\\s\\S]*?)(?=\\n\\s*\\n|\\n\\*\\*|\\n\`\`\`|$)`)) || [])[1] || '').trim();
-    const desc = [grab('Why:'), grab('Goal:')].filter(Boolean).join(' ').replace(/\*\*/g, '');
+    const why = grab('Why:').replace(/\*\*/g, '');
+    const goal = grab('Goal:').replace(/\*\*/g, '');
+    const desc = [why, goal].filter(Boolean).join(' ');
     const flowBlock = ((body.match(/\*\*User flow[^*]*\*\*:?\s*\n([\s\S]*?)(?=\n```|\n\*\*|$)/) || [])[1] || '');
     const flow = flowBlock.split('\n').map(l => l.trim())
       .filter(l => /^\d+\./.test(l)).map(l => l.replace(/^\d+\.\s*/, '').replace(/\*\*/g, '').replace(/\*/g, ''));
     const edgesBlock = ((body.match(/\*\*Edge cases[^*]*\*\*:?\s*\n([\s\S]*?)(?=\n```|\n\*\*|$)/) || [])[1] || '');
     const edges = edgesBlock.split('\n').map(l => l.trim())
       .filter(l => l.startsWith('-')).map(l => l.replace(/^-\s*/, ''));
-    features.push({ name, desc, flow, edges, issues: issuesByFeature[name] || [] });
+    features.push({ name, desc, why, goal, flow, edges, issues: issuesByFeature[name] || [] });
   }
   return features;
 }
@@ -696,6 +669,7 @@ a.back:hover{background:#1e2433;color:#93c5fd}
 <body>
 <header>
   <a class="back" href="/">← Board</a>
+  <a class="back" href="/checklist">Checklist</a>
   <div>
     <div class="hdr-title">${esc(title)}</div>
     <div class="hdr-sub">${features.length} feature${features.length !== 1 ? 's' : ''}</div>
@@ -753,7 +727,7 @@ svg.edges{position:absolute;top:0;left:0;pointer-events:none;overflow:visible}
 #tip .snip{margin-top:7px;font-size:12px;color:#cbd5e1;line-height:1.5;border-top:1px solid #1e2433;padding-top:7px}
 .wavehdr{position:absolute;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#475569}
 .msg{padding:40px 28px;color:#64748b}</style></head><body>
-<header><a class="back" href="/">← Board</a><div><div class="h1">Dependency graph</div><div class="sub">${esc(projectName)} — hover a ticket for its state, click to open it</div></div></header>
+<header><a class="back" href="/">← Board</a><a class="back" href="/checklist">Checklist</a><div><div class="h1">Dependency graph</div><div class="sub">${esc(projectName)} — hover a ticket for its state, click to open it</div></div></header>
 ${body}<div id="tip"></div></body></html>`;
 
   if (!fs.existsSync(gp)) return shell(`<div class="msg">No <code>kanban/graph.json</code> yet. Create tickets (kanban-create) or run <code>kanban-graph</code>.</div>`);
@@ -781,8 +755,12 @@ ${body}<div id="tip"></div></body></html>`;
     return `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" fill="none" stroke="#3b4a63" stroke-width="1.6" marker-end="url(#arw)"/>`;
   }).join('');
 
+  // Columns are dependency depth, not dispatch batches: depth 0 is ready now; deeper columns
+  // wait only on their own prerequisites.
+  const depthLabel = w => w === 99 ? 'unordered'
+    : (w === 0 ? 'ready now' : `needs ${w} prerequisite level${w === 1 ? '' : 's'}`);
   const waveHdrs = Object.keys(byWave).map(Number).sort((a,b)=>a-b).map(w =>
-    `<div class="wavehdr" style="left:${PADX + (w===99?maxWave+1:w)*COLW}px;top:6px">${w===99?'unordered':'wave '+w}</div>`).join('');
+    `<div class="wavehdr" style="left:${PADX + (w===99?maxWave+1:w)*COLW}px;top:6px">${depthLabel(w)}</div>`).join('');
 
   const tipHtml = (n, t) => {
     const ut = n.needs_user_test;
@@ -817,7 +795,8 @@ ${body}<div id="tip"></div></body></html>`;
   const counts = nodes.reduce((a,n)=>{a[n.status]=(a[n.status]||0)+1;return a;},{});
   const legend = `<div class="legend">` +
     Object.entries(STATUS_COLOR).filter(([k])=>k!=='COMPLETE').map(([k,c])=>`<span><b style="background:${c}"></b>${k}${counts[k]?' ('+counts[k]+')':''}</span>`).join('') +
-    `<span><span class="ring" style="position:static;display:inline-block;width:10px;height:10px;margin-right:5px"></span>ready (all prereqs DONE)</span></div>`;
+    `<span><span class="ring" style="position:static;display:inline-block;width:10px;height:10px;margin-right:5px"></span>ready (all prereqs DONE)</span>` +
+    `<span style="color:#64748b">Every ticket starts the moment all its prerequisites are DONE — not in batches.</span></div>`;
 
   const graphScript = `<script>
 (function(){
@@ -843,12 +822,7 @@ ${body}<div id="tip"></div></body></html>`;
     });
   }).catch(function(){}); };
 })();
-function testFeature(id,cmd){
-  if(!confirm('Set up the test environment for "'+id+'" and open it?'))return;
-  fetch('/launch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issue:id,test_command:cmd})})
-    .then(function(r){return r.json()}).then(function(d){ if(d&&d.url){window.open(d.url,'_blank')} else {alert(d&&d.message?d.message:'Launch requested — check the ticket.');} })
-    .catch(function(){alert('Launch failed.');});
-}
+function testFeature(id,cmd){ location.href='/test/'+encodeURIComponent(id); }
 </script>`;
   return shell(`${legend}<div class="wrap"><div class="canvas" style="width:${cw}px;height:${ch}px">
     <svg class="edges" width="${cw}" height="${ch}"><defs><marker id="arw" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#4b5f7a"/></marker></defs>${edgesSvg}</svg>
@@ -902,13 +876,219 @@ pre{padding:11px 13px;overflow-x:auto;margin:8px 0}code{padding:2px 5px}</style>
   // Test affordance: a user-test ticket that has passed validation (NEEDS_USER_TESTING) gets a
   // one-click Test button that sets up its environment via /launch.
   const nut = (fm.needs_user_test || 'true').trim() !== 'false';
-  const testable = nut && (fm.status || '').trim() === 'NEEDS_USER_TESTING';
+  const status = (fm.status || '').trim();
+  const testable = nut && (status === 'NEEDS_USER_TESTING' || status === 'NEEDS_TESTING');
   const testBar = testable
-    ? `<div style="margin:0 0 18px"><button onclick="testFeature('${esc(id)}',${JSON.stringify(fm.test_command||'')})" style="font-size:13px;font-weight:700;background:#0369a1;color:#fff;border:none;border-radius:6px;padding:9px 16px;cursor:pointer">▶ Test this feature</button>
-       <span style="font-size:11px;color:#64748b;margin-left:10px">validated — only your taste remains</span></div>
-       <script>function testFeature(id,cmd){if(!confirm('Set up the test environment for "'+id+'" and open it?'))return;fetch('/launch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issue:id,test_command:cmd})}).then(function(r){return r.json()}).then(function(d){if(d&&d.url){window.open(d.url,'_blank')}else{alert(d&&d.message?d.message:'Launch requested.')}}).catch(function(){alert('Launch failed.')});}</script>`
+    ? `<div style="margin:0 0 18px"><a href="/test/${esc(id)}" style="display:inline-block;font-size:13px;font-weight:700;background:#0369a1;color:#fff;border-radius:6px;padding:9px 16px;text-decoration:none">▶ Test this feature</a>
+       <span style="font-size:11px;color:#64748b;margin-left:10px">validated — only your taste remains</span></div>`
     : '';
-  return shell(`<div class="fm">${fmHtml}</div>${testBar}${out}`);
+  const feedbackBar = testable ? `
+<div id="verdict" style="margin:0 0 22px;background:#161b27;border:1px solid #1e2433;border-radius:8px;padding:16px 18px">
+  <div style="font-size:12px;font-weight:700;color:#c4b5fd;letter-spacing:.05em;text-transform:uppercase;margin-bottom:10px">Your verdict</div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <button id="vd-ok" onclick="verdictApprove('${esc(id)}')" style="font-size:13px;font-weight:700;background:#059669;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer">✓ All clear</button>
+    <button id="vd-issue" onclick="document.getElementById('vd-form').style.display='block';this.style.display='none'" style="font-size:13px;background:#1e293b;border:1px solid #2d3748;color:#e2e8f0;border-radius:6px;padding:8px 16px;cursor:pointer">Report an issue</button>
+  </div>
+  <div id="vd-form" style="display:none;margin-top:12px">
+    <textarea id="vd-text" rows="3" placeholder="What felt off? Where did it slow you down?" style="width:100%;background:#0d1117;border:1px solid #2d3748;color:#e2e8f0;border-radius:6px;padding:10px 12px;font-size:13px;font-family:inherit;resize:vertical;line-height:1.6"></textarea>
+    <button onclick="verdictReport('${esc(id)}')" style="margin-top:8px;font-size:13px;font-weight:600;background:#6d28d9;color:#e2e8f0;border:none;border-radius:6px;padding:7px 16px;cursor:pointer">Send to the coordinator</button>
+  </div>
+  <div id="vd-result" style="margin-top:10px;font-size:12px;color:#10b981"></div>
+</div>
+<script>
+async function postVerdict(payload){
+  const el=document.getElementById('vd-result');
+  try{
+    const r=await fetch('/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const j=await r.json();
+    el.style.color=j.ok?'#10b981':'#ef4444';
+    el.textContent=j.ok?(j.message||'Recorded.'):(j.error||j.message||'Failed.');
+    return j.ok;
+  }catch(e){el.style.color='#ef4444';el.textContent='Request failed: '+e.message;return false;}
+}
+async function verdictApprove(issue){
+  if(!confirm('Approve "'+issue+'" and integrate it?'))return;
+  document.getElementById('vd-ok').disabled=true;
+  if(!await postVerdict({issue,approve:true}))document.getElementById('vd-ok').disabled=false;
+}
+async function verdictReport(issue){
+  const text=document.getElementById('vd-text').value.trim();
+  if(!text)return;
+  if(await postVerdict({issue,text}))document.getElementById('vd-text').disabled=true;
+}
+</script>` : '';
+  return shell(`<div class="fm">${fmHtml}</div>${testBar}${feedbackBar}${out}`);
+}
+
+// ── Checklist page: product coverage — every feature and flow vs its tickets ──
+function renderChecklistPage() {
+  const projectName = path.basename(PROJECT_ROOT);
+  const productPath = path.join(KNOWLEDGE_DIR, 'prd', 'product.md');
+  const shell = (body) => `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Checklist — ${esc(projectName)}</title>
+${LIVE_SCRIPT}
+<style>*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#e2e8f0;min-height:100vh;font-size:14px}
+header{padding:18px 32px;border-bottom:1px solid #1e2433;display:flex;align-items:center;gap:14px}
+a.back{color:#7c9eb5;font-size:13px;text-decoration:none;padding:5px 12px;border:1px solid #2d3748;border-radius:5px;background:#161b27}
+a.back:hover{background:#1e2433;color:#93c5fd}
+.hdr-title{font-size:17px;font-weight:700;color:#f1f5f9}.hdr-sub{font-size:12px;color:#475569}
+.wrap{max-width:860px;margin:0 auto;padding:28px 32px;display:flex;flex-direction:column;gap:18px}
+.summary{background:#161b27;border:1px solid #1e2433;border-radius:8px;padding:18px 20px}
+.sum-line{font-size:15px;font-weight:700;color:#f1f5f9;margin-bottom:10px}
+.bar{height:10px;background:#0d1117;border:1px solid #1e2433;border-radius:5px;overflow:hidden;margin-bottom:12px}
+.bar-fill{height:100%;background:#059669;transition:width .3s}
+.sum-counts{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:#94a3b8}
+.sum-counts b{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.feat{background:#161b27;border:1px solid #1e2433;border-radius:8px;padding:16px 18px}
+.feat.shipped{border-color:#0d4a34}
+.feat-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.feat-name{font-size:15px;font-weight:700;color:#f1f5f9}
+.ship-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:.05em;text-transform:uppercase}
+.feat-goal{font-size:13px;color:#94a3b8;line-height:1.6;margin-bottom:10px}
+.flow-step{display:flex;align-items:flex-start;gap:9px;margin-bottom:6px}
+.step-num{width:20px;height:20px;border-radius:50%;background:#1e293b;border:1px solid #2d3748;color:#7c9eb5;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.step-text{font-size:13px;color:#cbd5e1;line-height:1.5}
+.tk-list{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;border-top:1px solid #1e2433;padding-top:10px}
+.tk{display:inline-flex;align-items:center;gap:7px;background:#0d1117;border:1px solid #2d3748;border-radius:5px;padding:4px 10px;text-decoration:none;color:#cbd5e1;font-size:12px}
+.tk:hover{border-color:#4b5f7a}
+.tk .chip{font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;color:#fff}
+.no-ticket{font-size:12px;color:#b45309;margin-top:10px;border-top:1px solid #1e2433;padding-top:10px}
+.lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#475569;margin-bottom:7px}
+.msg{padding:40px 32px;color:#475569;font-size:13px}
+code{background:#161b27;border:1px solid #1e2433;padding:2px 6px;border-radius:3px;color:#7dd3fc;font-family:'SF Mono',monospace}
+</style></head><body>
+<header><a class="back" href="/">← Board</a><a class="back" href="/graph">Graph</a><a class="back" href="/prd">Feature list</a>
+<div><div class="hdr-title">Product checklist</div><div class="hdr-sub">${esc(projectName)} — every feature you asked for, and where it stands</div></div></header>
+${body}</body></html>`;
+
+  if (!fs.existsSync(productPath))
+    return shell(`<div class="msg">No PRD found at <code>knowledge/prd/product.md</code> — nothing to check off yet.</div>`);
+  const raw = fs.readFileSync(productPath, 'utf8');
+  const features = parseProductPrd(raw, {});
+  if (!features.length)
+    return shell(`<div class="msg">product.md has no feature sections (expected <code>## feature-slug</code> headings).</div>`);
+
+  const tickets = readTickets();
+  const isDone = t => t.status === 'DONE' || t.status === 'COMPLETE';
+  const shippedCount = features.filter(f => {
+    const tix = tickets.filter(t => t.feature === f.name);
+    return tix.length > 0 && tix.every(isDone);
+  }).length;
+  const pct = Math.round((shippedCount / features.length) * 100);
+
+  const STATUS_ORDER = ['NOT_STARTED','IN_PROGRESS','NEEDS_SETUP','RUNNING_TESTS','NEEDS_TESTING','NEEDS_USER_TESTING','DONE'];
+  const counts = {};
+  for (const t of tickets) {
+    const s = isDone(t) ? 'DONE' : t.status;
+    counts[s] = (counts[s] || 0) + 1;
+  }
+  const countChips = STATUS_ORDER.concat(Object.keys(counts).filter(s => !STATUS_ORDER.includes(s)))
+    .filter(s => counts[s])
+    .map(s => `<span><b style="background:${STATUS_COLOR[s] || '#475569'}"></b>${esc(s)} (${counts[s]})</span>`).join('');
+
+  const summary = `<div class="summary">
+    <div class="sum-line">${shippedCount} of ${features.length} feature${features.length !== 1 ? 's' : ''} shipped (DONE)</div>
+    <div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>
+    <div class="sum-counts">${countChips || '<span>No tickets yet</span>'}</div>
+  </div>`;
+
+  const featHtml = features.map(f => {
+    const tix = tickets.filter(t => t.feature === f.name);
+    const shipped = tix.length > 0 && tix.every(isDone);
+    const shipBadge = shipped
+      ? `<span class="ship-badge" style="background:#059669;color:#fff">shipped</span>`
+      : (tix.length
+          ? `<span class="ship-badge" style="background:#1e293b;border:1px solid #2d3748;color:#94a3b8">in flight</span>`
+          : `<span class="ship-badge" style="background:#3b2506;border:1px solid #92400e;color:#fbbf24">no ticket yet</span>`);
+    const steps = f.flow.map((s, i) =>
+      `<div class="flow-step"><span class="step-num">${i + 1}</span><span class="step-text">${esc(s)}</span></div>`).join('');
+    const tkHtml = tix.map(t => {
+      const col = STATUS_COLOR[t.status] || (isDone(t) ? STATUS_COLOR.DONE : '#475569');
+      return `<a class="tk" href="/ticket/${esc(t.issue)}">${esc(t.issue)}<span class="chip" style="background:${col}">${esc(t.status)}</span></a>`;
+    }).join('');
+    return `<div class="feat${shipped ? ' shipped' : ''}" id="${esc(f.name)}">
+      <div class="feat-head"><span class="feat-name">${esc(f.name)}</span>${shipBadge}</div>
+      ${f.goal ? `<div class="feat-goal">${esc(f.goal)}</div>` : ''}
+      ${f.flow.length ? `<div class="lbl">User flow</div>${steps}` : ''}
+      ${tix.length ? `<div class="tk-list">${tkHtml}</div>` : `<div class="no-ticket">No implementing ticket yet — this feature is not being built.</div>`}
+    </div>`;
+  }).join('');
+
+  return shell(`<div class="wrap">${summary}${featHtml}</div>`);
+}
+
+// ── Test prep page: what you are about to test, and why ───────────────────────
+function renderTestPrepPage(id) {
+  const projectName = path.basename(PROJECT_ROOT);
+  const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '');
+  const fp = path.join(KANBAN_DIR, safeId + '.md');
+  const shell = (body) => `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Test ${esc(safeId)} — ${esc(projectName)}</title>
+<style>*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#e2e8f0;min-height:100vh;font-size:14px}
+header{padding:16px 28px;border-bottom:1px solid #1e2433;display:flex;align-items:center;gap:12px}
+a.back{color:#7c9eb5;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #2d3748;border-radius:6px;background:#161b27}
+a.back:hover{background:#1e2433;color:#93c5fd}
+.wrap{max-width:680px;margin:0 auto;padding:34px 28px;display:flex;flex-direction:column;gap:18px}
+.hd{font-size:19px;font-weight:700;color:#f1f5f9;line-height:1.3}
+.card{background:#161b27;border:1px solid #1e2433;border-radius:8px;padding:16px 18px}
+.lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#475569;margin-bottom:6px}
+.txt{font-size:13px;color:#cbd5e1;line-height:1.65}
+.reassure{background:#0f1a14;border:1px solid #14532d;border-radius:8px;padding:14px 16px;font-size:13px;color:#86efac;line-height:1.6}
+.actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.start{font-size:15px;font-weight:700;background:#0369a1;color:#fff;border:none;border-radius:8px;padding:13px 28px;cursor:pointer;font-family:inherit}
+.start:hover{background:#0284c7}.start:disabled{background:#2d3748;color:#475569;cursor:not-allowed}
+.skip{font-size:13px;color:#64748b;text-decoration:underline;text-decoration-style:dotted}
+.result{font-size:13px;color:#94a3b8;line-height:1.6}
+.result a{color:#7dd3fc}
+</style></head><body>
+<header><a class="back" href="/ticket/${esc(safeId)}">← Ticket</a><a class="back" href="/">Board</a></header>
+<div class="wrap">${body}</div></body></html>`;
+
+  if (!fs.existsSync(fp)) return shell(`<p class="txt">No ticket <code>${esc(safeId)}</code>.</p>`);
+  const fm = parseFrontmatter(fs.readFileSync(fp, 'utf8'));
+
+  let why = '', goal = '';
+  const productPath = path.join(KNOWLEDGE_DIR, 'prd', 'product.md');
+  if (fm.feature && fs.existsSync(productPath)) {
+    const feat = parseProductPrd(fs.readFileSync(productPath, 'utf8'), {}).find(f => f.name === fm.feature);
+    if (feat) { why = feat.why; goal = feat.goal; }
+  }
+
+  const featureCtx = (why || goal) ? `<div class="card">
+      <div class="lbl">How this fits the product${fm.feature ? ` — ${esc(fm.feature)}` : ''}</div>
+      ${why ? `<p class="txt"><strong>Why it exists:</strong> ${esc(why)}</p>` : ''}
+      ${goal ? `<p class="txt" style="margin-top:6px"><strong>Goal:</strong> ${esc(goal)}</p>` : ''}
+    </div>` : '';
+
+  return shell(`
+  <div class="hd">You're about to test: ${esc(fm.title || safeId)}</div>
+  ${featureCtx}
+  <div class="reassure">The automated validator has already checked that this works — correctness, edge cases, and error handling are covered. You are judging one thing: how it FEELS to use. Trust your gut.</div>
+  <div class="actions">
+    <button class="start" id="start-btn" onclick="startTest()">▶ Start test</button>
+    <a class="skip" href="/ticket/${esc(safeId)}">Skip for now</a>
+  </div>
+  <div class="result" id="result"></div>
+  <script>
+  async function startTest(){
+    const btn=document.getElementById('start-btn'), out=document.getElementById('result');
+    btn.disabled=true; btn.textContent='⏳ Preparing environment…';
+    try{
+      const r=await fetch('/launch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issue:'${esc(safeId)}'})});
+      const j=await r.json();
+      if(j.ok&&j.url){
+        btn.textContent='✓ Environment ready';
+        out.innerHTML='Opening <a href="'+j.url+'" target="_blank">'+j.url+'</a> — when you are done, give your verdict on the <a href="/ticket/${esc(safeId)}">ticket page</a>.';
+        setTimeout(function(){window.open(j.url,'_blank')||(location.href=j.url);},600);
+      }else{
+        btn.disabled=false; btn.textContent='▶ Start test';
+        out.textContent=(j.message||j.error||'Launch failed.');
+      }
+    }catch(e){ btn.disabled=false; btn.textContent='▶ Start test'; out.textContent='Request failed: '+e.message; }
+  }
+  </script>`);
 }
 
 const server = http.createServer((req, res) => {
@@ -961,6 +1141,19 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && req.url === '/checklist') {
+    res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
+    res.end(renderChecklistPage());
+    return;
+  }
+
+  if (req.method === 'GET' && req.url.startsWith('/test/')) {
+    const id = decodeURIComponent(req.url.slice('/test/'.length).split('?')[0]);
+    res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
+    res.end(renderTestPrepPage(id));
+    return;
+  }
+
   // Revision token: max mtime across ticket files + card dir. The board polls this and
   // reloads only when it changes, so a static board never reloads.
   if (req.method === 'GET' && req.url === '/rev') {
@@ -996,22 +1189,69 @@ const server = http.createServer((req, res) => {
     req.on('data', d => body += d);
     req.on('end', () => {
       try {
-        const { command, issue } = JSON.parse(body);
-        if (!command || typeof command !== 'string') {
-          res.writeHead(400, {'Content-Type': 'application/json'});
-          res.end(JSON.stringify({ok: false, error: 'No command'}));
+        const b = JSON.parse(body || '{}');
+        const issue = String(b.issue || '').replace(/[^a-zA-Z0-9_-]/g, '');
+
+        // Environment prep is server-side, from the ticket's frontmatter.
+        let fm = {};
+        if (issue) {
+          const kf = path.join(KANBAN_DIR, `${issue}.md`);
+          if (fs.existsSync(kf)) fm = parseFrontmatter(fs.readFileSync(kf, 'utf8'));
+          else if (!b.command && !b.test_command) {
+            res.writeHead(200, {'Content-Type': 'application/json'});
+            res.end(JSON.stringify({ok: false, message: `No ticket ${issue}`}));
+            return;
+          }
+        }
+
+        // Real-infra-or-nothing: unresolved external infra blocks the launch.
+        const needsInfra = (fm.needsInfra || fm.needs_infra || '').trim();
+        if (needsInfra && needsInfra !== '[]' && needsInfra.toLowerCase() !== 'none') {
+          res.writeHead(200, {'Content-Type': 'application/json'});
+          res.end(JSON.stringify({ok: false, message: `Needs setup: ${needsInfra} — provide it, then retry`}));
           return;
         }
-        const freshPort = pickFreshPort();
-        if (issue) registerTestPort(issue, freshPort);
-        const env = Object.assign({}, process.env, {PORT: String(freshPort)});
-        const child = spawn('bash', ['-c', command], {detached: true, stdio: 'ignore', env});
+
+        const command = b.command || b.test_command || fm.test_command || '';
+        if (!command || typeof command !== 'string') {
+          res.writeHead(200, {'Content-Type': 'application/json'});
+          res.end(JSON.stringify({ok: false, message: `No test_command on ${issue || 'request'} — the builder has not set one`}));
+          return;
+        }
+
+        const abs = p => p ? (path.isAbsolute(p) ? p : path.join(PROJECT_ROOT, p)) : '';
+        const repo = abs(fm.repo);
+        const worktree = abs(fm.worktree);
+        let cwd = PROJECT_ROOT;
+        if (worktree && fs.existsSync(worktree)) cwd = worktree;
+        else if (repo && fs.existsSync(repo)) cwd = repo;
+
+        let port = parseInt(fm.port);
+        if (isNaN(port)) { port = pickFreshPort(); if (issue) registerTestPort(issue, port); }
+
+        const env = Object.assign({}, process.env, {PORT: String(port)});
+        const envTest = repo ? path.join(repo, '.env.test') : '';
+        if (envTest && fs.existsSync(envTest)) {
+          for (const line of fs.readFileSync(envTest, 'utf8').split('\n')) {
+            const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+            if (m) env[m[1]] = m[2];
+          }
+        }
+
+        const child = spawn('bash', ['-c', command], {detached: true, stdio: 'ignore', cwd, env});
         child.unref();
+
+        const lu = (fm.landing_url || '').trim();
+        const url = lu
+          ? (lu.startsWith('http') ? lu : `http://localhost:${port}${lu.startsWith('/') ? lu : '/' + lu}`)
+          : `http://localhost:${port}`;
         res.writeHead(200, {'Content-Type': 'application/json'});
-        res.end(JSON.stringify({ok: true, port: freshPort, url: `http://localhost:${freshPort}`}));
+        res.end(JSON.stringify({ok: true, port, url}));
       } catch(e) {
-        res.writeHead(500, {'Content-Type': 'application/json'});
-        res.end(JSON.stringify({ok: false, error: e.message}));
+        try {
+          res.writeHead(200, {'Content-Type': 'application/json'});
+          res.end(JSON.stringify({ok: false, message: `Launch failed: ${e.message}`}));
+        } catch (e2) {}
       }
     });
     return;
@@ -1022,12 +1262,35 @@ const server = http.createServer((req, res) => {
     req.on('data', d => body += d);
     req.on('end', () => {
       try {
-        const { issue, feedback } = JSON.parse(body);
-        if (!issue || !feedback) {
+        const b = JSON.parse(body);
+        const issue = String(b.issue || '').replace(/[^a-zA-Z0-9_-]/g, '');
+        const approve = b.approve === true;
+        const text = String(b.text || b.feedback || '').trim();
+        if (!issue || (!approve && !text)) {
           res.writeHead(400, {'Content-Type': 'application/json'});
           res.end(JSON.stringify({ok: false, error: 'issue and feedback required'}));
           return;
         }
+        const factoryBin = path.resolve(__dirname, '..', 'bin');
+        const cmdEnv = Object.assign({}, process.env, {
+          KANBAN_PROJECT_ROOT: PROJECT_ROOT,
+          PATH: `${factoryBin}:${path.join(PROJECT_ROOT, 'bin')}:${process.env.PATH || ''}`,
+        });
+
+        if (approve) {
+          // "All clear" → integrate the ticket: kanban-done <issue> "<feedback>"
+          const child = spawn('bash', ['-c', 'kanban-done "$ISSUE" "$FBTEXT"'], {
+            detached: true, stdio: 'ignore',
+            cwd: PROJECT_ROOT,
+            env: Object.assign({}, cmdEnv, {ISSUE: issue, FBTEXT: text || 'approved'}),
+          });
+          child.unref();
+          res.writeHead(200, {'Content-Type': 'application/json'});
+          res.end(JSON.stringify({ok: true, message: `Approved — integrating ${issue} (kanban-done dispatched).`}));
+          return;
+        }
+
+        // "Report an issue" → append to the ticket's feedback section…
         const kf = path.join(KANBAN_DIR, `${issue}.md`);
         if (!fs.existsSync(kf)) {
           res.writeHead(404, {'Content-Type': 'application/json'});
@@ -1035,14 +1298,27 @@ const server = http.createServer((req, res) => {
           return;
         }
         let content = fs.readFileSync(kf, 'utf8');
+        const entry = `- ${new Date().toISOString()}: ${text}`;
         if (content.includes('## Feedback from user')) {
-          content = content.replace(/## Feedback from user\n[\s\S]*?(?=\n## |\s*$)/, `## Feedback from user\n${feedback}\n`);
+          content = content.replace(/## Feedback from user\n[\s\S]*?(?=\n## |\s*$)/,
+            m => m + (m.endsWith('\n') ? '' : '\n') + entry + '\n');
         } else {
-          content += `\n## Feedback from user\n${feedback}\n`;
+          content += `\n## Feedback from user\n${entry}\n`;
         }
         fs.writeFileSync(kf, content);
+
+        // …and route it to the coordinator/PM session.
+        try {
+          const child = spawn('bash', ['-c', 'tmux-delegate "$(cat ~/.claude/.coordinator)" "USER-FEEDBACK ${ISSUE}: ${FBTEXT}"'], {
+            detached: true, stdio: 'ignore',
+            cwd: PROJECT_ROOT,
+            env: Object.assign({}, cmdEnv, {ISSUE: issue, FBTEXT: text}),
+          });
+          child.unref();
+        } catch (e) { /* feedback is saved on the ticket even if delegation fails */ }
+
         res.writeHead(200, {'Content-Type': 'application/json'});
-        res.end(JSON.stringify({ok: true}));
+        res.end(JSON.stringify({ok: true, message: 'Feedback saved on the ticket and routed to the coordinator.'}));
       } catch(e) {
         res.writeHead(500, {'Content-Type': 'application/json'});
         res.end(JSON.stringify({ok: false, error: e.message}));
