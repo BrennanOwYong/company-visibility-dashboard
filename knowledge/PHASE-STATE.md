@@ -59,3 +59,22 @@ builders, workflows) fails until reset. Cheap file inspection by the main sessio
   this attempt via KANBAN_PROJECT_ROOT.
 - OPEN: (1) VALIDATED-auto-route stalled once on stale attempt bin -> re-synced; watch it holds.
   (2) seed-attempt should symlink bin not copy. (3) planner tightening control-settings acceptance.
+
+## CONFIRMED DEFECTS — next-session priority (user-caught 2026-07-10, verified)
+1. INFRA-INCOMPLETE VALIDATION MUST NOT REACH DONE. wire-mesh has needsInfra (Tailscale + Receiver
+   host) and the validator marked assertion #3 "not independently executable in this environment"
+   yet gave overall PASS -> auto-integrated to DONE. FIX: validator classifies an infra-blocked
+   assertion as `external` -> NEEDS_SETUP (protocol already says this); AND kanban-update should
+   refuse VALIDATED->DONE/NEEDS_USER_TESTING when the ticket has unresolved needsInfra and the
+   validation file flags infra-blocked assertions. wire-mesh's real 2-device security is UNPROVEN
+   (only the code-level guarantees are tested).
+2. TEST/LAUNCH MODEL ASSUMES A WEB APP; THIS PRODUCT IS A CHROME EXTENSION + CLOUD RECEIVER.
+   control-settings landing_url=/popup + test_command "npm run test && bash scripts/build-ext.sh"
+   starts NO server, so the Test button opens a dead http://localhost:PORT/popup. FIX = build KIV #1
+   (target-types): a per-target test-state contract. For an extension, the "test" is: build unpacked,
+   then prep page gives load-in-chrome instructions + what to click (no HTTP URL). Roadmap must set a
+   target-appropriate landing/test recipe, and /launch + /test/<id> must render per target type.
+3. NODE->FEATURE not one hop; and the UI cannot SHOW an extension/backend artifact (only status).
+   Consider: ticket page embeds the feature PRD inline; and a per-target "how to see it" panel.
+4. PROCESS: stop reporting DONE as "works & visible". DONE = pipeline-advanced. "Works & visible"
+   needs a target-appropriate demonstration (extension loaded, tests shown, or infra provisioned).
