@@ -830,6 +830,67 @@ function testFeature(id,cmd){ location.href='/test/'+encodeURIComponent(id); }
 }
 
 // ── Single ticket page ─────────────────────────────────────────────────────────
+
+// Map a knowledge-doc path (optionally with #anchor) to an in-app href.
+// knowledge/prd/product.md#<feature> → the PRD page anchor; everything else → the /file viewer.
+function sourceHref(p) {
+  const prd = p.match(/^knowledge\/prd\/product\.md#(.+)$/);
+  if (prd) return `/prd#${encodeURIComponent(prd[1])}`;
+  const [file, anchor] = p.split('#');
+  return `/file?path=${encodeURIComponent(file)}` + (anchor ? `#${encodeURIComponent(anchor)}` : '');
+}
+
+// Turn knowledge/... and kanban/... paths inside already-escaped text into viewer links.
+function linkifyPaths(escaped) {
+  return escaped.replace(/(knowledge\/[^\s,)]+|kanban\/[^\s,)]+)/g,
+    m0 => `<a class="ref" href="${sourceHref(m0)}">${m0}</a>`);
+}
+
+// Lightweight markdown render (headings, lists, code fences) shared by the ticket page
+// and the /file knowledge-doc viewer.
+function mdLite(bodyMd) {
+  const lines = bodyMd.split('\n'); let out = ''; let inPre = false;
+  for (const ln of lines) {
+    if (ln.startsWith('```')) { out += inPre ? '</pre>' : '<pre>'; inPre = !inPre; continue; }
+    if (inPre) { out += esc(ln) + '\n'; continue; }
+    if (ln.startsWith('## ')) out += `<h2 id="${esc(ln.slice(3).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-'))}">${esc(ln.slice(3))}</h2>`;
+    else if (ln.startsWith('### ')) out += `<h3>${esc(ln.slice(4))}</h3>`;
+    else if (/^\s*-\s/.test(ln)) out += `<li>${linkifyPaths(esc(ln.replace(/^\s*-\s/, '')))}</li>`;
+    else if (ln.trim() === '') out += '';
+    else out += `<p>${linkifyPaths(esc(ln))}</p>`;
+  }
+  if (inPre) out += '</pre>';
+  return out;
+}
+
+// Typed link fields of the new ticket schema: [key, label, critical].
+// A blank critical field is a missing section — rendered red so the gap is obvious.
+const TYPED_SOURCE_FIELDS = [
+  ['intent',           'Intent',           false],
+  ['build',            'Build',            true],
+  ['success_criteria', 'Success criteria', true],
+  ['testing',          'Testing',          false],
+  ['feasibility',      'Feasibility',      false],
+  ['architecture',     'Architecture',     false],
+];
+
+function renderSourcesIndex(fm) {
+  const rows = TYPED_SOURCE_FIELDS.map(([key, label, critical]) => {
+    const val = (fm[key] || '').trim();
+    let cell;
+    if (val) cell = `<a class="src-link" href="${sourceHref(val)}">${esc(val)}</a>`;
+    else if (critical) cell = `<span class="src-missing">MISSING</span>`;
+    else cell = `<span class="src-unset">not set</span>`;
+    return `<div class="src-k">${esc(label)}</div><div class="src-v">${cell}</div>`;
+  }).join('');
+  const tt = (fm.target_type || '').trim();
+  const ttBadge = tt ? `<span class="tt-badge">${esc(tt)}</span>` : '';
+  return `<div class="sources">
+    <div class="src-hdr">Sources ${ttBadge}</div>
+    <div class="src-grid">${rows}</div>
+  </div>`;
+}
+
 function renderTicketPage(id) {
   const projectName = path.basename(PROJECT_ROOT);
   const fp = path.join(KANBAN_DIR, id.replace(/[^a-zA-Z0-9_-]/g, '') + '.md');
@@ -847,32 +908,33 @@ h3{font-size:13px;color:#cbd5e1;margin:14px 0 6px}
 p{color:#94a3b8;line-height:1.65;margin:6px 0}
 li{color:#94a3b8;line-height:1.6;margin-left:20px}
 a.ref{color:#7dd3fc}code,pre{background:#0b1220;border:1px solid #1e2433;border-radius:5px;font-family:'SF Mono',monospace;font-size:12px;color:#a5d6ff}
-pre{padding:11px 13px;overflow-x:auto;margin:8px 0}code{padding:2px 5px}</style></head><body>
+pre{padding:11px 13px;overflow-x:auto;margin:8px 0}code{padding:2px 5px}
+.sources{background:#0f1623;border:1px solid #1e3050;border-radius:8px;padding:14px 16px;margin-bottom:16px}
+.src-hdr{font-size:12px;font-weight:700;color:#c4b5fd;letter-spacing:.05em;text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:10px}
+.tt-badge{background:#1e3a5f;border:1px solid #3d5a80;color:#93c5fd;font-size:10px;font-weight:700;padding:2px 9px;border-radius:4px;letter-spacing:.05em;text-transform:uppercase}
+.src-grid{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12px}
+.src-k{color:#64748b;font-weight:600}
+.src-v{word-break:break-word}
+.src-link{color:#7dd3fc;text-decoration:none}
+.src-link:hover{text-decoration:underline}
+.src-missing{color:#fff;background:#dc2626;font-weight:700;font-size:11px;padding:2px 9px;border-radius:4px;letter-spacing:.05em}
+.src-unset{color:#475569;font-style:italic}</style></head><body>
 <header><a class="back" href="/graph">← Graph</a><a class="back" href="/">Board</a></header><div class="body">${body}</div></body></html>`;
 
   if (!fs.existsSync(fp)) return shell(`<p>No ticket <code>${esc(id)}</code>.</p>`);
   const raw = fs.readFileSync(fp, 'utf8');
   const fm = parseFrontmatter(raw);
-  const fmHtml = Object.entries(fm).filter(([,v])=>String(v).trim()!=='').map(([k,v]) =>
-    `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>`).join('');
+  // New typed-link schema: detected by the presence of a 'build' or 'success_criteria'
+  // frontmatter key. Old tickets (prose ## Build / ## Success criteria sections) fall
+  // back to the original rendering.
+  const newSchema = ('build' in fm) || ('success_criteria' in fm);
+  const TYPED_KEYS = TYPED_SOURCE_FIELDS.map(([k]) => k);
+  const fmHtml = Object.entries(fm)
+    .filter(([k, v]) => String(v).trim() !== '' && !(newSchema && TYPED_KEYS.includes(k)))
+    .map(([k, v]) => `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>`).join('');
+  const sourcesHtml = newSchema ? renderSourcesIndex(fm) : '';
   const bodyMd = raw.replace(/^---\n[\s\S]*?\n---\n?/, '');
-
-  // Lightweight markdown render (headings, lists, code fences).
-  const lines = bodyMd.split('\n'); let out = ''; let inPre = false;
-  for (const ln of lines) {
-    if (ln.startsWith('```')) { out += inPre ? '</pre>' : '<pre>'; inPre = !inPre; continue; }
-    if (inPre) { out += esc(ln) + '\n'; continue; }
-    if (ln.startsWith('## ')) out += `<h2>${esc(ln.slice(3))}</h2>`;
-    else if (ln.startsWith('### ')) out += `<h3>${esc(ln.slice(4))}</h3>`;
-    else if (/^\s*-\s/.test(ln)) {
-      let item = esc(ln.replace(/^\s*-\s/, ''));
-      item = item.replace(/(knowledge\/[^\s,]+|kanban\/[^\s,]+)/g, '<a class="ref" href="#">$1</a>');
-      out += `<li>${item}</li>`;
-    }
-    else if (ln.trim() === '') out += '';
-    else out += `<p>${esc(ln)}</p>`;
-  }
-  if (inPre) out += '</pre>';
+  const out = mdLite(bodyMd);
   // Test affordance: a user-test ticket that has passed validation (NEEDS_USER_TESTING) gets a
   // one-click Test button that sets up its environment via /launch.
   const nut = (fm.needs_user_test || 'true').trim() !== 'false';
@@ -920,7 +982,42 @@ async function verdictReport(issue){
   const featLink = fm.feature
     ? `<div style="margin:0 0 16px"><a class="back" href="/prd#${esc(fm.feature)}" style="color:#7dd3fc">📄 ${esc(fm.feature)} — feature PRD (why/goal/user flow) ↗</a></div>`
     : '';
-  return shell(`${featLink}<div class="fm">${fmHtml}</div>${testBar}${feedbackBar}${out}`);
+  return shell(`${featLink}${sourcesHtml}<div class="fm">${fmHtml}</div>${testBar}${feedbackBar}${out}`);
+}
+
+// ── Knowledge-doc viewer: /file?path=knowledge/... (read-only, inside PROJECT_ROOT) ──
+function renderFilePage(rel) {
+  const projectName = path.basename(PROJECT_ROOT);
+  const shell = (body, title) => `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} — ${esc(projectName)}</title>
+<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#e2e8f0;font-size:14px}
+header{padding:16px 28px;border-bottom:1px solid #1e2433;display:flex;align-items:center;gap:12px}
+a.back{color:#7c9eb5;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #2d3748;border-radius:6px;background:#161b27}a.back:hover{background:#1e2433;color:#93c5fd}
+.path{font-size:12px;color:#475569;font-family:'SF Mono',monospace}
+.body{max-width:900px;margin:0 auto;padding:26px 28px}
+h1{font-size:18px;color:#f1f5f9;margin:0 0 14px}
+h2{font-size:15px;color:#f1f5f9;margin:22px 0 8px;border-bottom:1px solid #1e2433;padding-bottom:5px}
+h3{font-size:13px;color:#cbd5e1;margin:14px 0 6px}
+p{color:#94a3b8;line-height:1.65;margin:6px 0}
+li{color:#94a3b8;line-height:1.6;margin-left:20px}
+a.ref{color:#7dd3fc}code,pre{background:#0b1220;border:1px solid #1e2433;border-radius:5px;font-family:'SF Mono',monospace;font-size:12px;color:#a5d6ff}
+pre{padding:11px 13px;overflow-x:auto;margin:8px 0}code{padding:2px 5px}
+.err{color:#ef4444}</style></head><body>
+<header><a class="back" href="javascript:history.back()">← Back</a><a class="back" href="/">Board</a><span class="path">${esc(rel || '')}</span></header>
+<div class="body">${body}</div></body></html>`;
+
+  if (!rel || !rel.endsWith('.md'))
+    return { status: 400, html: shell(`<p class="err">path must be a .md file.</p>`, 'file') };
+  const abs = path.resolve(PROJECT_ROOT, rel);
+  if (abs !== PROJECT_ROOT && !abs.startsWith(PROJECT_ROOT + path.sep))
+    return { status: 403, html: shell(`<p class="err">Path escapes the project root.</p>`, 'file') };
+  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile())
+    return { status: 404, html: shell(`<p class="err">No file at <code>${esc(rel)}</code>.</p>`, 'file') };
+  const raw = fs.readFileSync(abs, 'utf8');
+  const md = raw.replace(/^---\n[\s\S]*?\n---\n?/, '');
+  const h1 = (md.match(/^# (.+)$/m) || [null, path.basename(rel)])[1].trim();
+  const bodyHtml = md.replace(/^# .+$/m, '') ;
+  return { status: 200, html: shell(`<h1>${esc(h1)}</h1>${mdLite(bodyHtml)}`, h1) };
 }
 
 // ── Checklist page: product coverage — every feature and flow vs its tickets ──
@@ -1135,6 +1232,15 @@ const server = http.createServer((req, res) => {
     const id = decodeURIComponent(req.url.slice('/ticket/'.length).split('?')[0]);
     res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
     res.end(renderTicketPage(id));
+    return;
+  }
+
+  if (req.method === 'GET' && req.url.startsWith('/file?')) {
+    let rel = '';
+    try { rel = new URLSearchParams(req.url.split('?')[1] || '').get('path') || ''; } catch (e) {}
+    const { status, html } = renderFilePage(rel);
+    res.writeHead(status, {'Content-Type': 'text/html; charset=utf-8'});
+    res.end(html);
     return;
   }
 

@@ -5,7 +5,7 @@ Use this skill at the start of every builder session and whenever you need to up
 ## Your issue file
 
 Your kanban file is at `$KANBAN_PROJECT_ROOT/kanban/$FEATURE_NAME.md` (also copied into your worktree as HANDOFF.md).
-The architect created it with your brief — read these sections first: **Intent**, **Build**, **Success criteria**, **Testing**, and **Dependencies** (issues you depend on + their contracts in `knowledge/contracts/`, and external infra the user must set up). The frontmatter holds: issue id, feature, status, milestone, dependsOn, needsInfra, links, repo. Then fill in the **What was built / How it works / Tests run / Lessons learned** sections as you go.
+The architect created it with your brief. The frontmatter is a typed link index: **intent**, **build**, **success_criteria**, **testing**, **feasibility**, and **architecture** each hold ONE link path to that section's canonical doc — read the linked docs, starting with build and success_criteria (always required; a blank critical field means the ticket is missing that section — flag it). The frontmatter also holds: issue, feature, title, status, milestone, repo, branch, worktree, port, dependsOn, needsInfra, needs_user_test, landing_url, test_command, and **target_type** (web | extension | cli | service | library — how the build is tested and shown). Overflow links live under **## Additional references** as labeled bullets, e.g. `- interface(session-bundle): knowledge/contracts/iface/session-bundle.md`, `- research(extension-capture): knowledge/technical/research/extension-capture.md`, `- module(wire): [[wire]]`. Then fill in the **What was built / How it works / Tests run / Lessons learned** sections as you go.
 
 ## Lifecycle — builder's view
 

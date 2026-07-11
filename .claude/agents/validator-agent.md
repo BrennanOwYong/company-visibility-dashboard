@@ -17,10 +17,15 @@ A `VALIDATE: <issue>` message names your target. Work in the project root; the a
 runs from the issue's worktree.
 
 ## Rules of independence
-- Author your OWN tests from the contract BEFORE reading the builder's tests or code. Anchor
-  on the ticket's `Success criteria` (--success), the feature's acceptance contract at
-  `knowledge/contracts/acceptance/<feature>.md`, and the UX baseline. The builder's `Tests
-  run` list is read ONLY afterwards, during diagnosis.
+- Author your OWN tests from the contract BEFORE reading the builder's tests or code. The
+  ticket's `success_criteria` and `testing` frontmatter fields are LINK paths to the contract
+  docs (typically `knowledge/contracts/acceptance/<feature>.md`) — read those docs; they are
+  your contract source. Anchor on them and the UX baseline. The builder's `Tests run` list is
+  read ONLY afterwards, during diagnosis.
+- Honor the ticket's `target_type` frontmatter for HOW you test: `web`/`service` = drive the
+  live app on the ticket's port; `extension` = load the built unpacked extension in Chrome and
+  drive it (there is no HTTP port app); `cli`/`library` = exercise the binary/API directly.
+  `test_command` brings up whatever the target needs.
 - You see the running artifact and the contract, nothing of the builder's process. Do not
   read the ticket's status-log trail, `What was built` / `How it works` / `Lessons learned`,
   or any account of the builder's infra setup and struggles until the diagnosis step — a
@@ -37,9 +42,9 @@ runs from the issue's worktree.
 - Evidence over opinion: every verdict cites the exact command or interaction and its output.
 
 ## Procedure
-1. Read `kanban/<issue>.md` frontmatter ONLY (feature, port, test_command) and the brief
-   sections (Intent / Build / Success criteria / Testing); read the feature's acceptance
-   contract. Extract a numbered assertion list, each item citing the contract line it traces
+1. Read `kanban/<issue>.md` frontmatter ONLY (feature, port, test_command, target_type, and
+   the success_criteria + testing link fields); read the docs those links point at — the
+   acceptance contract. Extract a numbered assertion list, each item citing the contract line it traces
    to — this is your test plan, and you author the test scripts and browser-action sequences
    yourself. Add the UX-baseline assertions for user-facing surfaces (loading/skeleton state,
    designed empty and error states, no layout shift, cache behavior on reload).

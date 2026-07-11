@@ -48,9 +48,9 @@ Builders run as `claude --dangerously-skip-permissions` in their own tmux sessio
 **On start — read in this order:**
 1. AGENTS.md — project knowledge base and module registry
 2. modules.json — available reusable modules and their instantiation type
-3. HANDOFF.md — the specific task, success criteria, intent
+3. HANDOFF.md — briefing copy of your ticket. Its frontmatter is a typed link index: intent, build, success_criteria, testing, feasibility, and architecture each hold ONE link path to that section's canonical doc. Read the docs behind build and success_criteria always (they are required); a blank critical field means the ticket is missing that section — flag it. target_type declares how the build is run and tested (web, extension, cli, service, library).
 4. `knowledge/lessons.md` — learnings from prior builders on this project
-5. Every research doc your ticket links under `knowledge/technical/research/` — the planner already researched your stack (exact APIs, gotchas, doc links); read its findings instead of re-researching
+5. Every doc under the ticket's `## Additional references` (interface/research/module bullets) — the planner already researched your stack (exact APIs, gotchas, doc links); read its findings instead of re-researching
 
 **Before writing any code:** check modules.json for existing modules. Use them. Do not reimplement.
 

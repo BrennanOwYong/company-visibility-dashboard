@@ -38,6 +38,7 @@ for (const f of fs.readdirSync(dir)) {
     id, feature: fm.feature || '', title: fm.title || '', status: fm.status || 'NOT_STARTED',
     milestone: fm.milestone || '', dependsOn: list(fm.dependsOn), needsInfra: list(fm.needsInfra),
     needs_user_test: (fm.needs_user_test || 'true').trim() !== 'false',
+    missingCritical: ['build', 'success_criteria'].filter(k => !(fm[k] || '').trim()),
   };
 }
 const ids = Object.keys(issues);
@@ -134,6 +135,15 @@ for (const w of waveNums) {
 if (Object.keys(infra).length) {
   console.log('\n── EXTERNAL INFRA NEEDED (user must set up → NEEDS_SETUP) ─────');
   for (const [inf, who] of Object.entries(infra)) console.log(`  ${inf}  ← ${who.join(', ')}`);
+}
+
+const incomplete = ids.filter(i => issues[i].missingCritical.length);
+if (incomplete.length) {
+  console.log('\n── ⚠ TICKET COMPLETENESS — blank critical link fields ────────');
+  for (const id of incomplete) console.log(`  [${id}] missing: ${issues[id].missingCritical.join(', ')}`);
+} else {
+  console.log('\n── TICKET COMPLETENESS ───────────────────────────────────────');
+  console.log('  ✓ every ticket links build + success_criteria');
 }
 
 if (dangling.length) {
