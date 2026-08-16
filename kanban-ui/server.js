@@ -1430,10 +1430,12 @@ const server = http.createServer((req, res) => {
           }
         }
 
-        const launcherPath = abs(launcher);
-        if (!launcherPath.startsWith(PROJECT_ROOT + path.sep) || !fs.existsSync(launcherPath)) {
+        const candidateRoot = fs.realpathSync(cwd);
+        const launcherPath = fs.existsSync(path.resolve(candidateRoot, launcher))
+          ? fs.realpathSync(path.resolve(candidateRoot, launcher)) : '';
+        if (!launcherPath || !launcherPath.startsWith(candidateRoot + path.sep) || !fs.statSync(launcherPath).isFile()) {
           res.writeHead(200, {'Content-Type':'application/json'});
-          res.end(JSON.stringify({ok:false,message:'The reviewed test launcher is missing or outside this project.'}));
+          res.end(JSON.stringify({ok:false,message:'The reviewed test launcher is missing or outside the validated candidate worktree.'}));
           return;
         }
         const runtimeDir = path.join(PROJECT_ROOT, '.factory', 'runtime', 'environments');
