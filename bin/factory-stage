@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""Snapshot, evaluate, freeze, and resume one software-factory phase."""
+import argparse, hashlib, json, os, shutil, subprocess, time
+from pathlib import Path
+
+root=Path(os.environ.get("KANBAN_PROJECT_ROOT") or subprocess.run(
+    ["git","rev-parse","--show-toplevel"],capture_output=True,text=True).stdout.strip() or ".").resolve()
+base=root/".factory/evaluations"
+
+def sha(path):
+    h=hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda:f.read(1024*1024),b""): h.update(block)
+    return h.hexdigest()
+
+def load(path,default):
+    try:return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:return default
+
+def save(path,data):
+    path.parent.mkdir(parents=True,exist_ok=True); tmp=path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data,indent=2)+"\n",encoding="utf-8"); tmp.replace(path)
+
+p=argparse.ArgumentParser(); sub=p.add_subparsers(dest="cmd",required=True)
+s=sub.add_parser("snapshot"); s.add_argument("run"); s.add_argument("stage"); s.add_argument("paths",nargs="+")
+v=sub.add_parser("verdict"); v.add_argument("run"); v.add_argument("stage"); v.add_argument("verdict",choices=("pass","fail")); v.add_argument("--summary",required=True); v.add_argument("--report")
+r=sub.add_parser("resume"); r.add_argument("run"); r.add_argument("stage"); r.add_argument("factory_version"); r.add_argument("--note",required=True)
+q=sub.add_parser("show"); q.add_argument("run")
+a=p.parse_args(); run_dir=base/a.run; state_path=run_dir/"state.json"
+state=load(state_path,{"schema_version":1,"run":a.run,"status":"active","stages":{},"history":[]})
+
+if a.cmd=="show": print(json.dumps(state,indent=2)); raise SystemExit()
+if a.cmd=="snapshot":
+    if state.get("status")=="frozen": raise SystemExit(f"run {a.run} is FROZEN at {state.get('frozen_at')}; repair and resume first")
+    stamp=str(int(time.time())); snap=run_dir/a.stage/stamp; artifacts=snap/"artifacts"; manifest=[]
+    for raw in a.paths:
+        src=(root/raw).resolve()
+        if not src.exists() or (root not in src.parents and src!=root): raise SystemExit(f"invalid snapshot path: {raw}")
+        paths=[src] if src.is_file() else [x for x in src.rglob("*") if x.is_file() and ".git" not in x.parts and ".factory" not in x.parts]
+        for item in paths:
+            rel=item.relative_to(root); dst=artifacts/rel; dst.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(item,dst)
+            manifest.append({"path":str(rel),"sha256":sha(item),"bytes":item.stat().st_size})
+    record={"stage":a.stage,"snapshot":stamp,"created_at":int(time.time()),"source_commit":subprocess.run(["git","rev-parse","HEAD"],cwd=root,capture_output=True,text=True).stdout.strip(),"files":manifest}
+    save(snap/"manifest.json",record); state["stages"][a.stage]={"status":"awaiting_evaluation","snapshot":stamp,"manifest":str((snap/"manifest.json").relative_to(root))}
+    state["history"].append({"event":"snapshot","stage":a.stage,"snapshot":stamp,"at":int(time.time())}); save(state_path,state); print(snap)
+elif a.cmd=="verdict":
+    entry=state["stages"].get(a.stage)
+    if not entry or entry.get("status")!="awaiting_evaluation": raise SystemExit(f"{a.stage} has no snapshot awaiting evaluation")
+    entry.update({"status":"passed" if a.verdict=="pass" else "failed","summary":a.summary,"evaluated_at":int(time.time()),"report":a.report or ""})
+    state["history"].append({"event":"verdict","stage":a.stage,"verdict":a.verdict,"at":int(time.time())})
+    if a.verdict=="fail":
+        state.update({"status":"frozen","frozen_at":a.stage,"frozen_snapshot":entry["snapshot"]})
+        ticket=root/"kanban"/f"system-factory-repair-{a.run}.md"; ticket.parent.mkdir(exist_ok=True)
+        ticket.write_text(f"""---
+issue: system-factory-repair-{a.run}
+feature: factory-evaluation
+title: Repair factory after {a.stage} evaluation
+status: FACTORY_REPAIR
+system: true
+needs_user_test: false
+---
+
+## Intent
+
+The {a.stage} phase failed evaluation. The run is frozen at snapshot {entry['snapshot']}.
+
+## Required action
+
+{a.summary}
+""",encoding="utf-8")
+    save(state_path,state); print(state["status"])
+elif a.cmd=="resume":
+    if state.get("status")!="frozen" or state.get("frozen_at")!=a.stage: raise SystemExit(f"run is not frozen at {a.stage}")
+    state.update({"status":"active","resumed_from":{"stage":a.stage,"snapshot":state["frozen_snapshot"],"factory_version":a.factory_version,"note":a.note,"at":int(time.time())}})
+    (root/"kanban"/f"system-factory-repair-{a.run}.md").unlink(missing_ok=True)
+    state["history"].append({"event":"resume","stage":a.stage,"factory_version":a.factory_version,"at":int(time.time())}); save(state_path,state); print("active")
