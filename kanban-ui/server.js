@@ -165,6 +165,7 @@ function readTickets() {
         feature: id,
         title: plan.title || fm.title || '',
         status: fm.status || 'NOT_STARTED',
+        system: fm.system === 'true',
         needs_user_test: typeof plan.subjective_ux === 'boolean' ? plan.subjective_ux : (fm.needs_user_test || 'true').trim() !== 'false',
         port: fm.port || '',
         test_command: fm.test_command || '',
@@ -173,6 +174,7 @@ function readTickets() {
         architecture_doc: plan.architecture || fm.architecture_doc || '',
         order: plan.order ?? 999999,
         intent: parseSection(text, 'Intent'),
+        requiredAction: parseSection(text, 'Required action'),
         whatBuilt: /\(builder fills/.test(rawBuilt) ? '' : rawBuilt,
         tests: (text.match(/^- \[x\].*$/gm) || []),
         lastUpdate: (text.match(/^### .+$/gm) || []).slice(-1)[0] || '',
@@ -291,7 +293,11 @@ function renderTicketCard(t, context, allTickets) {
   const last = t.lastUpdate
     ? `<div class="last">${esc(t.lastUpdate.replace(/^### /, ''))}</div>` : '';
 
-  const setup = t.status === 'NEEDS_SETUP' ? `<div class="test-card"><a class="tc-feature-link" href="/file?path=${encodeURIComponent(`docs/delivery/tickets/${t.issue}-setup.md`)}">Setup instructions ↗</a><button class="launch-btn" onclick="resolveSetup('${esc(t.issue)}')">I completed the setup</button></div>` : '';
+  const setup = (t.status === 'NEEDS_SETUP' || t.status === 'NEEDS_HUMAN')
+    ? t.system
+      ? `<div class="test-card"><strong>Required action</strong><p>${esc(t.requiredAction || 'Resolve this project setup condition.')}</p><small>This ticket closes automatically when preflight passes.</small></div>`
+      : `<div class="test-card"><a class="tc-feature-link" href="/file?path=${encodeURIComponent(`docs/delivery/tickets/${t.issue}-setup.md`)}">Setup instructions ↗</a><button class="launch-btn" onclick="resolveSetup('${esc(t.issue)}')">I completed the setup</button></div>`
+    : '';
   return `<div class="ticket" id="ticket-${esc(t.issue)}">
     <div class="ticket-header">
       <span class="issue">${esc(t.issue)}</span>
@@ -322,11 +328,11 @@ function renderPage(tickets) {
 
   const unstarted    = tickets.filter(t => t.status === 'NOT_STARTED');
   const inProgress   = tickets.filter(t => t.status === 'IN_PROGRESS');
-  const blocked      = tickets.filter(t => t.status === 'NEEDS_SETUP');
+  const blocked      = tickets.filter(t => t.status === 'NEEDS_SETUP' || t.status === 'NEEDS_HUMAN');
   const needsReview  = tickets.filter(t => t.status === 'NEEDS_TESTING' || t.status === 'NEEDS_USER_TESTING');
   const complete     = tickets.filter(t => t.status === 'DONE' || t.status === 'COMPLETE');
   // Anything else → in-progress
-  const unknown      = tickets.filter(t => !['NOT_STARTED','IN_PROGRESS','NEEDS_SETUP','NEEDS_TESTING','NEEDS_USER_TESTING','PR_OPEN','DONE','COMPLETE'].includes(t.status));
+  const unknown      = tickets.filter(t => !['NOT_STARTED','IN_PROGRESS','NEEDS_SETUP','NEEDS_HUMAN','NEEDS_TESTING','NEEDS_USER_TESTING','PR_OPEN','DONE','COMPLETE'].includes(t.status));
 
   const allInProgress = [...inProgress, ...unknown];
 
@@ -359,7 +365,7 @@ function renderPage(tickets) {
         <div class="blocked-slide-inner" id="blocked-slide">
           <span class="slide-face">
             <span class="dot" style="background:#ef4444"></span>
-            Needs Setup
+            Needs Human
             <span class="count">${blocked.length}</span>
           </span>
           <span class="slide-face">
@@ -490,7 +496,6 @@ header h1{font-size:19px;font-weight:700;color:#f1f5f9}
     <button class="refresh" onclick="location.reload()">↺ Refresh</button>
   </div>
 </header>
-${renderPreflight()}
 <div class="board">
   ${unstartedCol}
   ${inProgressCol}
@@ -737,7 +742,7 @@ a.back:hover{background:#1e2433;color:#93c5fd}
 
 // ── Dependency graph page ──────────────────────────────────────────────────────
 const STATUS_COLOR = {
-  NOT_STARTED: '#475569', IN_PROGRESS: '#2563eb', NEEDS_SETUP: '#dc2626',
+  NOT_STARTED: '#475569', IN_PROGRESS: '#2563eb', NEEDS_SETUP: '#dc2626', NEEDS_HUMAN: '#dc2626',
   RUNNING_TESTS: '#7c3aed', NEEDS_USER_TESTING: '#d97706', PR_OPEN: '#2563eb', DONE: '#059669', COMPLETE: '#059669',
 };
 
@@ -1126,7 +1131,7 @@ ${body}</body></html>`;
   }).length;
   const pct = Math.round((shippedCount / features.length) * 100);
 
-  const STATUS_ORDER = ['NOT_STARTED','IN_PROGRESS','NEEDS_SETUP','RUNNING_TESTS','NEEDS_TESTING','NEEDS_USER_TESTING','PR_OPEN','DONE'];
+  const STATUS_ORDER = ['NOT_STARTED','IN_PROGRESS','NEEDS_SETUP','NEEDS_HUMAN','RUNNING_TESTS','NEEDS_TESTING','NEEDS_USER_TESTING','PR_OPEN','DONE'];
   const counts = {};
   for (const t of tickets) {
     const s = isDone(t) ? 'DONE' : t.status;

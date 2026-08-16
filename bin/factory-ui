@@ -7,7 +7,6 @@ STATE="$ROOT/.factory/runtime/ui.json"
 LOG="$ROOT/.factory/runtime/ui.log"
 SESSION="factory-ui-$(printf '%s' "$ROOT" | sha256sum | cut -c1-10)"
 mkdir -p "$ROOT/.factory/runtime"
-KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-preflight" >/dev/null 2>&1 || true
 
 read_field() { python3 - "$STATE" "$1" <<'PY'
 import json,sys
@@ -26,6 +25,7 @@ case "$ACTION" in
     [ -f "$STATE" ] || exit 0
     SAVED_SESSION=$(read_field session); tmux kill-session -t "${SAVED_SESSION:-$SESSION}" 2>/dev/null || true; rm -f "$STATE";;
   start)
+    KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-preflight" >/dev/null 2>&1 || true
     if "$0" status >/dev/null 2>&1; then "$0" status; exit 0; fi
     PORT=$(python3 - <<'PY'
 import socket

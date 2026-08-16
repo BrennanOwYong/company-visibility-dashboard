@@ -47,5 +47,31 @@ for cid,label,cmd,action in (
 
 report={"schema_version":1,"checked_at":int(time.time()),"ready":not any(c["status"]=="blocked" for c in checks),"checks":checks}
 tmp=out.with_suffix(".tmp"); tmp.write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8"); tmp.replace(out)
+kanban=root/"kanban"; kanban.mkdir(exist_ok=True)
+active=set()
+for check in checks:
+    if check["status"] != "blocked": continue
+    issue=f"system-preflight-{check['id']}"; active.add(issue)
+    ticket=kanban/f"{issue}.md"
+    ticket.write_text(f"""---
+issue: {issue}
+feature: system-preflight
+title: {check['label']}
+status: NEEDS_HUMAN
+system: true
+check_id: {check['id']}
+needs_user_test: false
+---
+
+## Intent
+
+{check['detail']}
+
+## Required action
+
+{check['action'] or 'Resolve the reported project setup condition.'}
+""",encoding="utf-8")
+for ticket in kanban.glob("system-preflight-*.md"):
+    if ticket.stem not in active: ticket.unlink()
 print(json.dumps(report,indent=2))
 sys.exit(0 if report["ready"] else 2)
