@@ -23,9 +23,15 @@ elif re.search(r"://[^/@\s]+:[^/@\s]+@",origin.stdout.strip()):
 else: add("git-origin","GitHub repository","pass","Origin is configured without an embedded credential.")
 
 gh=run(["gh","auth","status"])
-add("github-auth","GitHub authentication","pass" if gh.returncode==0 else "blocked",
-    "GitHub CLI authentication is ready." if gh.returncode==0 else "GitHub CLI authentication is unavailable.",
-    "Run gh auth login." if gh.returncode else "")
+gh_text=(gh.stdout+gh.stderr).lower()
+needs_workflow=(root/".github/workflows").exists()
+has_workflow_scope="workflow" in gh_text
+if gh.returncode != 0:
+    add("github-auth","GitHub authentication","blocked","GitHub CLI authentication is unavailable.","Run gh auth login.")
+elif needs_workflow and not has_workflow_scope:
+    add("github-auth","GitHub authentication","blocked","GitHub is authenticated, but the token lacks the workflow permission required by this repository.","Run gh auth refresh -h github.com -s workflow.")
+else:
+    add("github-auth","GitHub authentication","pass","GitHub CLI authentication has the permissions required by this repository.")
 
 branch=run(["git","branch","--show-current"]).stdout.strip()
 add("local-main","Visible project checkout","pass" if branch=="main" else "blocked",
