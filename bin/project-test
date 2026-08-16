@@ -11,5 +11,6 @@ node --check "$ROOT/kanban-ui/server.js"
 KANBAN_PROJECT_ROOT="$ROOT/tests/fixtures/factory-project" "$ROOT/bin/roadmap-sync" --root "$ROOT/tests/fixtures/factory-project" >/dev/null
 "$ROOT/tests/test-browser-evidence.sh"
 "$ROOT/tests/test-ui-user-tests.sh"
+"$ROOT/tests/test-test-contract.sh"
 "$ROOT/tests/test-github-pr-flow.sh"
 echo 'factory project checks: PASS'

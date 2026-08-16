@@ -101,10 +101,10 @@ if [ "$STATUS" = "VALIDATED" ]; then
     echo "[$ISSUE] validated (function/performance/requirements); needs_user_test=false — integrating to DONE"
     exec kanban-done "$ISSUE" "auto: validated; no user test required"
   fi
-  # user-test ticket: it needs a test_command so the board's Test button can bring up its state.
-  TC=$(grep "^test_command:" "$KANBAN_FILE" | head -1 | sed 's/^test_command:[[:space:]]*//')
+  # A user-test ticket needs a persistent launcher. The terminating candidate check is separate.
+  TC=$(grep "^test_launcher:" "$KANBAN_FILE" | head -1 | sed 's/^test_launcher:[[:space:]]*//')
   if [ -z "$TC" ]; then
-    echo "[$ISSUE] REFUSED VALIDATED: needs_user_test but test_command is blank. Set it to the command/URL that brings up the test state."
+    echo "[$ISSUE] REFUSED VALIDATED: needs_user_test but test_launcher is blank. Declare the reviewed persistent environment launcher in the roadmap."
     exit 1
   fi
   STATUS="NEEDS_USER_TESTING"   # translate the verb to the stored state
