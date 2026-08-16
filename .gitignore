@@ -35,6 +35,8 @@
 # Project-local factory runtime. Durable product/architecture/delivery memory under docs/ is tracked.
 /.factory/runtime/
 /.factory/events/
+/.factory/evaluations/
+/factory-eval/
 
 # Generated Python bytecode
 __pycache__/

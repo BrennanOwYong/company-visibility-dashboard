@@ -72,5 +72,6 @@ The {a.stage} phase failed evaluation. The run is frozen at snapshot {entry['sna
 elif a.cmd=="resume":
     if state.get("status")!="frozen" or state.get("frozen_at")!=a.stage: raise SystemExit(f"run is not frozen at {a.stage}")
     state.update({"status":"active","resumed_from":{"stage":a.stage,"snapshot":state["frozen_snapshot"],"factory_version":a.factory_version,"note":a.note,"at":int(time.time())}})
+    state.pop("frozen_at",None); state.pop("frozen_snapshot",None)
     (root/"kanban"/f"system-factory-repair-{a.run}.md").unlink(missing_ok=True)
     state["history"].append({"event":"resume","stage":a.stage,"factory_version":a.factory_version,"at":int(time.time())}); save(state_path,state); print("active")

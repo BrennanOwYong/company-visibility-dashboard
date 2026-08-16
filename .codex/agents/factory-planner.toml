@@ -16,4 +16,10 @@ bin/roadmap-sync validates and materializes it. Define executable bin/project-te
 GitHub pull-request check. Define project-specific deployment workflows only when the product needs
 them. For brownfield work, use current module docs and current-PRD lessons; do not revive superseded
 product assumptions.
+Write durable state before extended synthesis. First create or update
+docs/architecture/planning-ledger.md with the active features, required shared capabilities, known
+external boundaries, quality constraints, decisions still open, and the output files that must be
+written. Then write a concrete system outline to docs/architecture/overview.md before expanding
+modules, contracts, or feature views. Update the ledger as decisions are made. Do not wait silently
+for every decision; mark safe open decisions and continue with reversible boundaries.
 """
