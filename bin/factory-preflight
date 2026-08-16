@@ -45,9 +45,9 @@ add("local-main","Visible project checkout","pass" if branch=="main" else "block
 
 if shutil.which("aws"):
     aws=run(["aws","sts","get-caller-identity","--output","json"],20)
-    add("aws-auth","AWS authentication","pass" if aws.returncode==0 else "blocked",
+    add("aws-auth","AWS authentication","pass" if aws.returncode==0 else "info",
         "AWS returned a current caller identity." if aws.returncode==0 else "AWS credentials are absent or expired.",
-        "Run aws login, then aws sts get-caller-identity." if aws.returncode else "")
+        "Run aws login, then aws sts get-caller-identity before an AWS-dependent feature starts." if aws.returncode else "")
 else: add("aws-auth","AWS authentication","info","AWS CLI is not installed. This is required only by AWS features.")
 
 for cid,label,cmd,action in (
