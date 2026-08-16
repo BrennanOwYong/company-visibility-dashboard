@@ -1562,3 +1562,22 @@ server.listen(UI_PORT, () => {
   console.log(`Project    →  ${PROJECT_ROOT}`);
   console.log(`Ports      →  http://localhost:${UI_PORT}/ports`);
 });
+
+// Re-evaluate external setup without an agent. The preflight program writes or removes normal
+// NEEDS_HUMAN tickets. The kanban file watcher then pushes only real state changes to the browser.
+let preflightRunning = false;
+const refreshPreflight = () => {
+  if (preflightRunning) return;
+  const command = path.join(PROJECT_ROOT, 'bin', 'factory-preflight');
+  if (!fs.existsSync(command)) return;
+  preflightRunning = true;
+  const child = spawn(command, [], {
+    cwd: PROJECT_ROOT,
+    stdio: 'ignore',
+    env: {...process.env, KANBAN_PROJECT_ROOT: PROJECT_ROOT},
+  });
+  child.on('close', () => { preflightRunning = false; });
+  child.on('error', () => { preflightRunning = false; });
+};
+setTimeout(refreshPreflight, 1000).unref();
+setInterval(refreshPreflight, 15000).unref();
