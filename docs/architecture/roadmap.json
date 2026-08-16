@@ -1,5 +1,116 @@
 {
   "schema_version": 1,
   "prd_version": 1,
-  "features": []
+  "features": [
+    {
+      "id": "dashboard-shell",
+      "title": "Dashboard shell and side menu",
+      "doc": "docs/product/features/dashboard-shell.md",
+      "architecture": "docs/architecture/features/dashboard-shell.md",
+      "depends_on": [],
+      "subjective_ux": true,
+      "needs_infra": [],
+      "test": {
+        "driver": "browser",
+        "check": "bin/project-test",
+        "check_args": [],
+        "launcher": "bin/project-dev",
+        "launcher_args": [],
+        "landing_path": "/",
+        "health_path": "/health",
+        "timeout_seconds": 120
+      }
+    },
+    {
+      "id": "connected-social-tools",
+      "title": "Connected social-media creator tools",
+      "doc": "docs/product/features/connected-social-tools.md",
+      "architecture": "docs/architecture/features/connected-social-tools.md",
+      "depends_on": [
+        "dashboard-shell"
+      ],
+      "subjective_ux": true,
+      "needs_infra": [
+        "provider OAuth test application",
+        "approved creator test account",
+        "secret-vault test namespace"
+      ],
+      "test": {
+        "driver": "browser",
+        "check": "bin/project-test",
+        "check_args": [],
+        "launcher": "bin/project-dev",
+        "launcher_args": [],
+        "landing_path": "/connected-tools",
+        "health_path": "/health",
+        "timeout_seconds": 120
+      }
+    },
+    {
+      "id": "company-memory",
+      "title": "Organization Memory",
+      "doc": "docs/product/features/company-memory.md",
+      "architecture": "docs/architecture/features/company-memory.md",
+      "depends_on": [
+        "dashboard-shell"
+      ],
+      "subjective_ux": true,
+      "needs_infra": [
+        "approved model test credential"
+      ],
+      "test": {
+        "driver": "browser",
+        "check": "bin/project-test",
+        "check_args": [],
+        "launcher": "bin/project-dev",
+        "launcher_args": [],
+        "landing_path": "/memory",
+        "health_path": "/health",
+        "timeout_seconds": 120
+      }
+    },
+    {
+      "id": "page-builder-chat",
+      "title": "Guided page-building chat",
+      "doc": "docs/product/features/page-builder-chat.md",
+      "architecture": "docs/architecture/features/page-builder-chat.md",
+      "depends_on": [
+        "connected-social-tools",
+        "company-memory"
+      ],
+      "subjective_ux": true,
+      "needs_infra": [],
+      "test": {
+        "driver": "browser",
+        "check": "bin/project-test",
+        "check_args": [],
+        "launcher": "bin/project-dev",
+        "launcher_args": [],
+        "landing_path": "/pages/new",
+        "health_path": "/health",
+        "timeout_seconds": 120
+      }
+    },
+    {
+      "id": "generated-dashboard-pages",
+      "title": "Persistent generated dashboard pages",
+      "doc": "docs/product/features/generated-dashboard-pages.md",
+      "architecture": "docs/architecture/features/generated-dashboard-pages.md",
+      "depends_on": [
+        "page-builder-chat"
+      ],
+      "subjective_ux": true,
+      "needs_infra": [],
+      "test": {
+        "driver": "browser",
+        "check": "bin/project-test",
+        "check_args": [],
+        "launcher": "bin/project-dev",
+        "launcher_args": [],
+        "landing_path": "/pages/evaluation-page",
+        "health_path": "/health",
+        "timeout_seconds": 120
+      }
+    }
+  ]
 }

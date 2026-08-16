@@ -1,0 +1,32 @@
+#!/bin/bash
+# Persistent loopback test-environment launcher used by the project Test Me UI.
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+PORT=${PORT:-}
+
+case "$PORT" in
+  ''|*[!0-9]*) echo 'project-dev: the factory must supply a numeric PORT' >&2; exit 1;;
+esac
+if [ "$PORT" -lt 1024 ] || [ "$PORT" -gt 65535 ]; then
+  echo 'project-dev: PORT must be between 1024 and 65535' >&2
+  exit 1
+fi
+[ -f "$ROOT/package.json" ] || {
+  echo 'project-dev: the application package has not been built yet' >&2
+  exit 1
+}
+node - "$ROOT/package.json" <<'JS'
+const fs = require('fs');
+const pkg = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (!pkg.scripts || typeof pkg.scripts['dev:test'] !== 'string' || !pkg.scripts['dev:test'].trim()) {
+  console.error('project-dev: package.json must define the persistent dev:test script');
+  process.exit(1);
+}
+JS
+
+export HOST=127.0.0.1
+export NODE_ENV=test
+export FACTORY_TEST_MODE=1
+cd "$ROOT"
+exec npm run dev:test -- "$@"

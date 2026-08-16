@@ -9,7 +9,7 @@
       "architecture": "docs/architecture/features/account-core.md",
       "depends_on": [],
       "subjective_ux": false,
-      "test": {"driver": "browser", "launcher": "true"},
+      "test": {"driver": "browser", "check": "bin/project-test", "launcher": "bin/project-dev", "landing_path": "/", "health_path": "/health"},
       "log_command": "printf logs"
     },
     {
@@ -19,7 +19,7 @@
       "architecture": "docs/architecture/features/account-screen.md",
       "depends_on": ["account-core"],
       "subjective_ux": true,
-      "test": {"driver": "browser", "launcher": "true"},
+      "test": {"driver": "browser", "check": "bin/project-test", "launcher": "bin/project-dev", "landing_path": "/", "health_path": "/health"},
       "log_command": "printf logs"
     },
     {
@@ -29,7 +29,7 @@
       "architecture": "docs/architecture/features/help-screen.md",
       "depends_on": [],
       "subjective_ux": true,
-      "test_command": "true",
+      "test": {"driver": "browser", "check": "bin/project-test", "launcher": "bin/project-dev", "landing_path": "/help", "health_path": "/health"},
       "log_command": "printf logs"
     }
   ]

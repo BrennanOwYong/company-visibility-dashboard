@@ -20,7 +20,12 @@ if origin.returncode:
     add("git-origin","GitHub repository","blocked","No origin remote is configured.","Connect an empty GitHub repository in project setup.")
 elif re.search(r"://[^/@\s]+:[^/@\s]+@",origin.stdout.strip()):
     add("git-origin","GitHub repository","blocked","The origin URL contains an embedded credential.","Remove the credential from the URL and revoke or rotate it in GitHub.")
-else: add("git-origin","GitHub repository","pass","Origin is configured without an embedded credential.")
+else:
+    reachable=run(["git","ls-remote","origin"],20)
+    if reachable.returncode:
+        add("git-origin","GitHub repository","blocked","The configured origin cannot be reached or does not exist.","Create or grant access to the GitHub repository, then confirm that git ls-remote origin succeeds.")
+    else:
+        add("git-origin","GitHub repository","pass","Origin is configured without an embedded credential and is reachable.")
 
 gh=run(["gh","auth","status"])
 gh_text=(gh.stdout+gh.stderr).lower()

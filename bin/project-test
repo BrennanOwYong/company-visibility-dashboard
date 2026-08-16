@@ -11,5 +11,31 @@ node --check "$ROOT/kanban-ui/server.js"
 KANBAN_PROJECT_ROOT="$ROOT/tests/fixtures/factory-project" "$ROOT/bin/roadmap-sync" --root "$ROOT/tests/fixtures/factory-project" >/dev/null
 "$ROOT/tests/test-browser-evidence.sh"
 "$ROOT/tests/test-ui-user-tests.sh"
+"$ROOT/tests/test-test-contract.sh"
+"$ROOT/tests/test-candidate-launcher.sh"
 "$ROOT/tests/test-github-pr-flow.sh"
-echo 'factory project checks: PASS'
+
+if [ -f "$ROOT/package.json" ]; then
+  [ -f "$ROOT/package-lock.json" ] || {
+    echo 'project-test: package-lock.json is required when package.json exists' >&2
+    exit 1
+  }
+  node - "$ROOT/package.json" <<'JS'
+const fs = require('fs');
+const pkg = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const required = ['typecheck', 'lint', 'test:unit', 'test:contract', 'test:browser', 'test:events'];
+const missing = required.filter(name => !pkg.scripts || typeof pkg.scripts[name] !== 'string' || !pkg.scripts[name].trim());
+if (missing.length) {
+  console.error(`project-test: required package scripts are missing: ${missing.join(', ')}`);
+  process.exit(1);
+}
+JS
+  if [ "${CI:-}" = true ] || [ ! -d "$ROOT/node_modules" ]; then
+    (cd "$ROOT" && npm ci)
+  fi
+  for script in typecheck lint test:unit test:contract test:browser test:events; do
+    (cd "$ROOT" && npm run "$script")
+  done
+fi
+
+echo 'whole-project candidate checks: PASS'

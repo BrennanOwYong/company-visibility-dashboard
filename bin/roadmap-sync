@@ -67,6 +67,22 @@ def validate(root: Path, roadmap: dict) -> tuple[list[dict], dict[str, int]]:
         expected_arch = f"docs/architecture/features/{feature_id}.md"
         if architecture != expected_arch or not (root / architecture).exists():
             fail(f"{feature_id}: architecture must reference existing {expected_arch}")
+        test = feature.get("test")
+        if not isinstance(test, dict):
+            fail(f"{feature_id}: test must be an object")
+        for command_key, args_key in (("check", "check_args"), ("launcher", "launcher_args")):
+            command = test.get(command_key, "")
+            args = test.get(args_key, [])
+            if command and (not isinstance(command, str) or command.startswith("/") or ".." in Path(command).parts):
+                fail(f"{feature_id}: test.{command_key} must be a project-relative executable")
+            if not isinstance(args, list) or any(not isinstance(value, str) for value in args):
+                fail(f"{feature_id}: test.{args_key} must be an array of strings")
+        if not test.get("check"):
+            fail(f"{feature_id}: test.check is required")
+        if feature.get("subjective_ux"):
+            for key in ("launcher", "health_path", "landing_path"):
+                if not test.get(key):
+                    fail(f"{feature_id}: subjective UX testing requires test.{key}")
         deps = feature.get("depends_on", [])
         if not isinstance(deps, list) or any(not isinstance(dep, str) for dep in deps):
             fail(f"{feature_id}: depends_on must be an array of IDs")
@@ -108,7 +124,10 @@ def ticket_text(root: Path, feature: dict) -> str:
     user_test = str(bool(feature.get("subjective_ux", False))).lower()
     repo = feature.get("repo", str(root))
     test = feature.get("test", {})
-    launcher = test.get("launcher", feature.get("test_command", "")) if isinstance(test, dict) else ""
+    check = test.get("check", "") if isinstance(test, dict) else ""
+    check_args = json.dumps(test.get("check_args", []), separators=(",", ":")) if isinstance(test, dict) else "[]"
+    launcher = test.get("launcher", "") if isinstance(test, dict) else ""
+    launcher_args = json.dumps(test.get("launcher_args", []), separators=(",", ":")) if isinstance(test, dict) else "[]"
     driver = test.get("driver", "code") if isinstance(test, dict) else "code"
     return f"""---
 issue: {feature_id}
@@ -126,7 +145,10 @@ port:
 dependsOn: {depends}
 needsInfra: {','.join(feature.get('needs_infra', []))}
 needs_user_test: {user_test}
-test_command: {launcher}
+test_check: {check}
+test_check_args: {check_args}
+test_launcher: {launcher}
+test_launcher_args: {launcher_args}
 test_driver: {driver}
 log_command: {feature.get('log_command', '')}
 feature_doc: {feature['doc']}

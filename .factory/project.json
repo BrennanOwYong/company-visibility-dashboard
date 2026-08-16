@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "project_id": "8068395a-120b-4ce7-a4a8-4d8474d7e220",
+  "github": "https://github.com/BrennanOwYong/company-visibility-dashboard.git",
+  "default_branch": "main",
+  "docs_root": "docs",
+  "runtime_root": ".factory/runtime",
+  "evaluation_run": "company-dashboard-v1"
+}

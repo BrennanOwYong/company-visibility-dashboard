@@ -168,7 +168,8 @@ function readTickets() {
         system: fm.system === 'true',
         needs_user_test: typeof plan.subjective_ux === 'boolean' ? plan.subjective_ux : (fm.needs_user_test || 'true').trim() !== 'false',
         port: fm.port || '',
-        test_command: fm.test_command || '',
+        test_check: fm.test_check || '',
+        test_launcher: fm.test_launcher || '',
         dependsOn: Array.isArray(plan.depends_on) ? plan.depends_on.join(',') : '',
         feature_doc: plan.doc || fm.feature_doc || '',
         architecture_doc: plan.architecture || fm.architecture_doc || '',
@@ -308,7 +309,7 @@ function renderTicketCard(t, context, allTickets) {
     ${renderDeps(t.dependsOn, allTickets)}
     ${last}
     ${setup}
-    ${renderTestCardBlock(t.testCard, t.test_command, t.feature, t.issue, context, t.needs_user_test)}
+    ${renderTestCardBlock(t.testCard, t.test_launcher, t.feature, t.issue, context, t.needs_user_test)}
   </div>`;
 }
 
@@ -834,7 +835,7 @@ ${body}<div id="tip"></div></body></html>`;
     const ut = n.needs_user_test;
     const ready = n.status === 'NOT_STARTED' && n.ready;
     const testable = ut && n.status === 'NEEDS_USER_TESTING';
-    const tb = JSON.stringify(t.test_command || '');
+    const tb = JSON.stringify(t.test_launcher || '');
     return `<a class="node" id="nd-${esc(n.id)}" data-id="${esc(n.id)}" href="/ticket/${esc(n.id)}"
       data-tip="${esc(tipHtml(n, t)).replace(/"/g,'&quot;')}" style="left:${p.x}px;top:${p.y}px">
       <span class="ring" style="${ready?'':'display:none'}"></span>
@@ -872,7 +873,7 @@ ${body}<div id="tip"></div></body></html>`;
       var slot=el.querySelector('.tbtn-slot');
       if(slot){ var want=n.needs_user_test&&n.status==='NEEDS_USER_TESTING';
         if(want&&!slot.firstChild){var b=document.createElement('button');b.className='tbtn';b.textContent='▶ Test';
-          b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();testFeature(n.id,n.test_command||'');};slot.appendChild(b);}
+          b.onclick=function(ev){ev.preventDefault();ev.stopPropagation();testFeature(n.id,n.test_launcher||'');};slot.appendChild(b);}
         else if(!want&&slot.firstChild){slot.innerHTML='';} }
     });
   }).catch(function(){}); };
@@ -1301,7 +1302,7 @@ const server = http.createServer((req, res) => {
       const g = JSON.parse(fs.readFileSync(path.join(KANBAN_DIR, 'graph.json'), 'utf8'));
       const tix = Object.fromEntries(readTickets().map(t => [t.issue, t]));
       nodes = (g.nodes || []).map(n => ({ id: n.id, status: n.status, ready: n.ready,
-        needs_user_test: n.needs_user_test, test_command: (tix[n.id] || {}).test_command || '' }));
+        needs_user_test: n.needs_user_test, test_launcher: (tix[n.id] || {}).test_launcher || '' }));
     } catch (e) {}
     res.writeHead(200, {'Content-Type': 'application/json', 'Cache-Control': 'no-store'});
     res.end(JSON.stringify({ nodes }));
@@ -1381,7 +1382,7 @@ const server = http.createServer((req, res) => {
         if (issue) {
           const kf = path.join(KANBAN_DIR, `${issue}.md`);
           if (fs.existsSync(kf)) fm = parseFrontmatter(fs.readFileSync(kf, 'utf8'));
-          else if (!b.command && !b.test_command) {
+          else {
             res.writeHead(200, {'Content-Type': 'application/json'});
             res.end(JSON.stringify({ok: false, message: `No ticket ${issue}`}));
             return;
@@ -1399,7 +1400,7 @@ const server = http.createServer((req, res) => {
         const planned = readRoadmap().find(f => f.id === issue) || {};
         const test = planned.test || {};
         const launcher = typeof test.launcher === 'string' ? test.launcher : '';
-        const launcherArgs = Array.isArray(test.args) && test.args.every(x => typeof x === 'string') ? test.args : [];
+        const launcherArgs = Array.isArray(test.launcher_args) && test.launcher_args.every(x => typeof x === 'string') ? test.launcher_args : [];
         if (!launcher) {
           res.writeHead(200, {'Content-Type': 'application/json'});
           res.end(JSON.stringify({ok: false, message: `No reviewed test launcher is declared for ${issue}`}));
@@ -1429,10 +1430,12 @@ const server = http.createServer((req, res) => {
           }
         }
 
-        const launcherPath = abs(launcher);
-        if (!launcherPath.startsWith(PROJECT_ROOT + path.sep) || !fs.existsSync(launcherPath)) {
+        const candidateRoot = fs.realpathSync(cwd);
+        const launcherPath = fs.existsSync(path.resolve(candidateRoot, launcher))
+          ? fs.realpathSync(path.resolve(candidateRoot, launcher)) : '';
+        if (!launcherPath || !launcherPath.startsWith(candidateRoot + path.sep) || !fs.statSync(launcherPath).isFile()) {
           res.writeHead(200, {'Content-Type':'application/json'});
-          res.end(JSON.stringify({ok:false,message:'The reviewed test launcher is missing or outside this project.'}));
+          res.end(JSON.stringify({ok:false,message:'The reviewed test launcher is missing or outside the validated candidate worktree.'}));
           return;
         }
         const runtimeDir = path.join(PROJECT_ROOT, '.factory', 'runtime', 'environments');

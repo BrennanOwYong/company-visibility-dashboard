@@ -28,7 +28,10 @@ Read `docs/product/PRD.md`, `docs/product/principles.md`, every active
       "needs_infra": [],
       "test": {
         "driver": "browser|api|code",
-        "launcher": "bin/project-test",
+        "check": "bin/project-test",
+        "check_args": [],
+        "launcher": "bin/project-dev",
+        "launcher_args": [],
         "landing_path": "/",
         "health_path": "/health",
         "timeout_seconds": 60
@@ -41,6 +44,11 @@ Read `docs/product/PRD.md`, `docs/product/principles.md`, every active
 Array order is the intended presentation chronology. `depends_on` is the only build gate. Add an
 edge only when the dependent feature requires code or a contract that must already be merged. Do
 not encode computed waves, status, agent identity, ports, or branch names.
+
+`test.check` is a terminating executable that proves the pull-request candidate. `test.launcher` is
+a persistent executable that starts the browser-test environment. Never use one executable for both
+purposes. Arguments are JSON string arrays. A feature that needs subjective browser testing must
+declare a launcher, health path, and landing path.
 
 Run `bin/roadmap-sync --sync-kanban`. Fix every missing document, dangling edge, duplicate, or cycle
 it reports. The program computes levels and readiness; never hand-author them.

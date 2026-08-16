@@ -11,11 +11,12 @@ fm() { grep -m1 "^$1:" "$TICKET" | sed "s/^$1:[[:space:]]*//"; }
 REPO=$(fm repo); REPO=${REPO:-$ROOT}
 WORKTREE=$(fm worktree)
 BRANCH=$(fm branch); BRANCH=${BRANCH:-feat/$ISSUE}
-TEST_COMMAND=$(fm test_command)
+TEST_CHECK=$(fm test_check)
+TEST_CHECK_ARGS=$(fm test_check_args)
 FEATURE_DOC=$(fm feature_doc)
 DISPATCH_BASE=$(fm dispatch_base)
 [ -d "$WORKTREE" ] || { echo "[$ISSUE] missing worktree: $WORKTREE"; exit 1; }
-[ -n "$TEST_COMMAND" ] || { echo "[$ISSUE] test_command is required before testing"; exit 1; }
+[ -n "$TEST_CHECK" ] || { echo "[$ISSUE] test_check is required before testing"; exit 1; }
 [ -z "$(git -C "$WORKTREE" status --porcelain)" ] || {
   echo "[$ISSUE] worktree is dirty; commit code and documentation first"; exit 1;
 }
@@ -59,8 +60,18 @@ if ! git -C "$WORKTREE" rebase "$BASE"; then
 fi
 rmdir "$LOCK"; trap - EXIT
 
-echo "[$ISSUE] running post-rebase builder tests"
-(cd "$WORKTREE" && bash -lc "$TEST_COMMAND")
+echo "[$ISSUE] running post-rebase candidate check"
+python3 - "$WORKTREE" "$TEST_CHECK" "${TEST_CHECK_ARGS:-[]}" <<'PY'
+import json, os, subprocess, sys
+worktree, command, raw_args = sys.argv[1:]
+args = json.loads(raw_args)
+if not isinstance(args, list) or any(not isinstance(value, str) for value in args):
+    raise SystemExit("test_check_args must be a JSON string array")
+path = os.path.realpath(os.path.join(worktree, command))
+if not path.startswith(os.path.realpath(worktree) + os.sep) or not os.path.isfile(path):
+    raise SystemExit("test_check must be an existing executable inside the worktree")
+subprocess.run([path, *args], cwd=worktree, check=True)
+PY
 CANDIDATE=$(git -C "$WORKTREE" rev-parse HEAD)
 git -C "$WORKTREE" push --force-with-lease origin "$BRANCH"
 python3 - "$TICKET" "$BASE" "$CANDIDATE" <<'PY'
