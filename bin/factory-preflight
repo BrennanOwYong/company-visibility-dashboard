@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""Write a secret-safe project preflight report for scripts and the dashboard."""
+import json, os, re, shutil, subprocess, sys, time
+from pathlib import Path
+
+root=Path(os.environ.get("KANBAN_PROJECT_ROOT") or subprocess.run(
+    ["git","rev-parse","--show-toplevel"],capture_output=True,text=True).stdout.strip() or ".").resolve()
+out=root/".factory/runtime/preflight.json"; out.parent.mkdir(parents=True,exist_ok=True)
+
+def run(argv, timeout=15):
+    try: return subprocess.run(argv,cwd=root,capture_output=True,text=True,timeout=timeout)
+    except Exception as exc: return type("R",(),{"returncode":127,"stdout":"","stderr":str(exc)})()
+
+checks=[]
+def add(cid,label,status,detail,action=""):
+    checks.append({"id":cid,"label":label,"status":status,"detail":detail,"action":action})
+
+origin=run(["git","remote","get-url","origin"])
+if origin.returncode:
+    add("git-origin","GitHub repository","blocked","No origin remote is configured.","Connect an empty GitHub repository in project setup.")
+elif re.search(r"://[^/@\s]+:[^/@\s]+@",origin.stdout.strip()):
+    add("git-origin","GitHub repository","blocked","The origin URL contains an embedded credential.","Remove the credential from the URL and revoke or rotate it in GitHub.")
+else: add("git-origin","GitHub repository","pass","Origin is configured without an embedded credential.")
+
+gh=run(["gh","auth","status"])
+add("github-auth","GitHub authentication","pass" if gh.returncode==0 else "blocked",
+    "GitHub CLI authentication is ready." if gh.returncode==0 else "GitHub CLI authentication is unavailable.",
+    "Run gh auth login." if gh.returncode else "")
+
+branch=run(["git","branch","--show-current"]).stdout.strip()
+add("local-main","Visible project checkout","pass" if branch=="main" else "blocked",
+    "The visible checkout is local main." if branch=="main" else f"The visible checkout is {branch or 'detached'}, not main.",
+    "Finish or preserve current work, then switch the visible project checkout to main." if branch!="main" else "")
+
+if shutil.which("aws"):
+    aws=run(["aws","sts","get-caller-identity","--output","json"],20)
+    add("aws-auth","AWS authentication","pass" if aws.returncode==0 else "blocked",
+        "AWS returned a current caller identity." if aws.returncode==0 else "AWS credentials are absent or expired.",
+        "Run aws login, then aws sts get-caller-identity." if aws.returncode else "")
+else: add("aws-auth","AWS authentication","info","AWS CLI is not installed. This is required only by AWS features.")
+
+for cid,label,cmd,action in (
+    ("tmux","Parallel agent runtime","tmux","Install tmux."),
+    ("agent-browser","Browser test driver","agent-browser","Install agent-browser and its browser runtime."),
+    ("codex","Codex runtime","codex","Install or repair the Codex CLI.")):
+    ok=bool(shutil.which(cmd)); add(cid,label,"pass" if ok else "blocked",f"{cmd} is available." if ok else f"{cmd} is not available.","" if ok else action)
+
+report={"schema_version":1,"checked_at":int(time.time()),"ready":not any(c["status"]=="blocked" for c in checks),"checks":checks}
+tmp=out.with_suffix(".tmp"); tmp.write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8"); tmp.replace(out)
+print(json.dumps(report,indent=2))
+sys.exit(0 if report["ready"] else 2)

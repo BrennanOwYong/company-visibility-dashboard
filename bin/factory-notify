@@ -1,0 +1,22 @@
+#!/bin/bash
+# Append a project-local coordination event and opportunistically deliver it to a live tmux agent.
+set -euo pipefail
+TARGET=${1:-}; shift || true
+MESSAGE="$*"
+ROOT=${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+[ -n "$TARGET" ] && [ -n "$MESSAGE" ] || { echo "Usage: factory-notify <agent> <message>"; exit 1; }
+mkdir -p "$ROOT/.factory/events" "$ROOT/.factory/runtime/inbox"
+python3 - "$ROOT/.factory/events/messages.jsonl" "$TARGET" "$MESSAGE" <<'PY'
+import json, sys, time
+path, target, message = sys.argv[1:]
+with open(path, "a", encoding="utf-8") as handle:
+    handle.write(json.dumps({"ts": int(time.time()*1000), "type": "message",
+                             "target": target, "message": message}) + "\n")
+PY
+TMUX_TARGET="$TARGET"
+if [ "$TARGET" = coordinator ] && [ -s "$ROOT/.factory/runtime/coordinator" ]; then
+  TMUX_TARGET=$(head -1 "$ROOT/.factory/runtime/coordinator")
+fi
+if tmux has-session -t "=$TMUX_TARGET" 2>/dev/null; then
+  KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/tmux-delegate" "$TMUX_TARGET" "$MESSAGE" || true
+fi

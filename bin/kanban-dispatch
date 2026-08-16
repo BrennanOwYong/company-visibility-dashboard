@@ -1,14 +1,14 @@
 #!/bin/bash
 # kanban-dispatch — spawns one builder per NOT_STARTED kanban issue.
 #
-# Issues are created by the architect via kanban-create (the source of truth); each
+# Issues are materialized from the planner roadmap by roadmap-sync; each
 # issue file is the builder's brief. spawn-builder is called once per issue and uses
 # that issue (it does not overwrite it). Idempotent: an issue whose worktree field is
 # already set has been dispatched and is skipped, so this is safe to re-run as the
 # architect adds issues.
 #
 # A port is NOT assigned here (testing-phase resource — allocated when the validator
-# boots). The board view is kanban-check; tmux liveness is deliberately not mapped to
+# boots). The browser UI is the board; tmux liveness is deliberately not mapped to
 # state (KIV 7).
 # Note: the standalone kickoff trigger and pluggable tracker backend are KIV 8 — this
 # script is the local-markdown dispatcher.
@@ -20,7 +20,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(cat "$HOME/.claude/.coordinator-root" 2>/dev/null || pwd)}"
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 KANBAN_DIR="$PROJECT_ROOT/kanban"
 
 MODE="dispatch"; FORCE="0"
@@ -46,7 +46,7 @@ DISPATCH_LOG="$KANBAN_DIR/dispatch-log.jsonl"
 # tested end to end. Dep-free tickets go first; a dependent starts the moment its last dependency
 # finishes. Independent tickets run in parallel under MAX_BUILDERS (a rate-limit ceiling only —
 # frontier sessions freeze at a usage modal when too many run at once). Each dispatch pass recomputes
-# the ready-set; the post-merge hook re-runs dispatch as branches land, starting newly-ready tickets.
+# the ready-set; github-sync re-runs dispatch after GitHub merges a prerequisite.
 MAX_BUILDERS="${MAX_BUILDERS:-8}"
 active_builders() {   # live builder sessions still working: just-spawned (NOT_STARTED) or IN_PROGRESS
   # A spawned builder occupies a slot from the moment its session exists — counting only
@@ -67,7 +67,7 @@ active_builders() {   # live builder sessions still working: just-spawned (NOT_S
 edge_satisfied() {   # edge_satisfied <issue> <dep> — the dependency must be DONE (built + merged)
   local dep_file="$KANBAN_DIR/$2.md"
   if [ ! -f "$dep_file" ]; then
-    echo "  ⚠ $1 — dependency '$2' has no ticket (dangling; kanban-graph flags it) — not blocking on it" >&2
+    echo "  ⚠ $1 — prerequisite '$2' has no ticket; roadmap-sync must be repaired" >&2
     return 0
   fi
   [ "$(grep -m1 '^status:' "$dep_file" | awk '{print $2}')" = "DONE" ]
@@ -97,8 +97,18 @@ for KFILE in "$KANBAN_DIR"/*.md; do
     echo "  • $ISSUE — already dispatched (worktree set) — skipped"; SKIPPED=$((SKIPPED+1)); continue
   fi
 
-  FEATURE=$(fm "$KFILE" feature)
-  DEPS=$(fm "$KFILE" dependsOn)
+  FEATURE="$ISSUE"
+  # Dependency order belongs only to the deterministic roadmap graph, never mutable ticket prose.
+  DEPS=$(python3 - "$KANBAN_DIR/graph.json" "$ISSUE" <<'PY'
+import json,sys
+try:
+    graph=json.load(open(sys.argv[1]))
+    node=next(n for n in graph.get("nodes",[]) if n.get("id")==sys.argv[2])
+    print(",".join(node.get("requires",[])))
+except Exception:
+    print("")
+PY
+)
   REPO=$(fm "$KFILE" repo)
 
   # Ready-set gate: every prerequisite (dependency) must be DONE (see header).
@@ -110,7 +120,7 @@ for KFILE in "$KANBAN_DIR"/*.md; do
   fi
 
   # Rate-limit ceiling. No waiting loop: whatever doesn't fit this pass is picked up by
-  # the next kanban-dispatch (the post-merge hook re-runs it as branches land).
+  # the next kanban-dispatch after a GitHub merge or other ticket event.
   if [ "$MODE" != "dryrun" ] && [ "$(active_builders)" -ge "$MAX_BUILDERS" ]; then
     echo "  • $ISSUE — ready, but MAX_BUILDERS=$MAX_BUILDERS ceiling reached — next pass"
     SKIPPED=$((SKIPPED+1)); continue
@@ -137,5 +147,5 @@ done
 
 echo ""
 echo "Dispatched: $DISPATCHED   Skipped: $SKIPPED"
-[ "$MODE" != "dryrun" ] && [ "$DISPATCHED" -gt 0 ] && echo "Run 'kanban-check' for the board."
+[ "$MODE" != "dryrun" ] && [ "$DISPATCHED" -gt 0 ] && echo "Open the project factory UI for the board."
 exit 0

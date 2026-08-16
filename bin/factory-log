@@ -3,7 +3,7 @@
 # Appends a timestamped JSON event to kanban/agent-events.jsonl. This is the telemetry
 # stream for verifying the autonomous pipeline (handoffs, spawns) actually fires without
 # manual intervention. Read it with: cat kanban/agent-events.jsonl
-ROOT="${KANBAN_PROJECT_ROOT:-$(cat "$HOME/.claude/.coordinator-root" 2>/dev/null)}"
+ROOT="${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 [ -z "$ROOT" ] && exit 0
 EVENT="$1"; shift || true
 [ -z "$EVENT" ] && exit 0

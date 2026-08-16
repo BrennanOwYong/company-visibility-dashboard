@@ -1,0 +1,18 @@
+name: Factory pull-request checks
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run project test contract
+        run: |
+          test -x bin/project-test || { echo "The planner must provide executable bin/project-test"; exit 1; }
+          bin/project-test

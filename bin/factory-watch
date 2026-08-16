@@ -1,7 +1,7 @@
 #!/bin/bash
 # factory-watch — live, human-readable feed of the factory's HIGH-LEVEL actions only
 # (handoffs, dispatches, tickets, status moves, validation verdicts — no LLM internals).
-ROOT="${KANBAN_PROJECT_ROOT:-$(cat "$HOME/.claude/.coordinator-root" 2>/dev/null || pwd)}"
+ROOT="${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 tail -n 50 -f "$ROOT/kanban/agent-events.jsonl" 2>/dev/null | python3 -u -c '
 import json,sys
 for line in sys.stdin:

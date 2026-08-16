@@ -7,7 +7,7 @@
 AGENT="$1"
 shift
 MSG="$*"
-ROOT="${KANBAN_PROJECT_ROOT:-$(cat "$HOME/.claude/.coordinator-root" 2>/dev/null)}"
+ROOT="${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 
 if [ -z "$ROOT" ] || [ -z "$AGENT" ] || [ -z "$MSG" ]; then
   echo "Usage: tmux-delegate <agent> <message>"

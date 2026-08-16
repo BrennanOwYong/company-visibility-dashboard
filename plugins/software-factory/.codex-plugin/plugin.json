@@ -1,0 +1,21 @@
+{
+  "name": "software-factory",
+  "version": "0.1.0+codex.20260816065024",
+  "description": "One autonomous Codex software factory per project",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Software Factory",
+    "shortDescription": "Autonomous project-local engineering factory.",
+    "longDescription": "Bootstraps one project-local Codex factory with mini-PRD tickets, deterministic DAG dispatch, worktree builders, independent evidence-based testing, observability, and current-PRD technical memory.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [
+      "skills",
+      "hooks"
+    ],
+    "defaultPrompt": "Initialize or continue this project's autonomous software factory."
+  }
+}

@@ -1,0 +1,79 @@
+#!/bin/bash
+# Rebase a completed ticket onto current main, rerun builder tests, then wake the tester.
+set -euo pipefail
+
+ISSUE=${1:-}
+ROOT=${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+TICKET="$ROOT/kanban/$ISSUE.md"
+[ -n "$ISSUE" ] && [ -f "$TICKET" ] || { echo "Usage: prepare-for-test <issue>"; exit 1; }
+
+fm() { grep -m1 "^$1:" "$TICKET" | sed "s/^$1:[[:space:]]*//"; }
+REPO=$(fm repo); REPO=${REPO:-$ROOT}
+WORKTREE=$(fm worktree)
+BRANCH=$(fm branch); BRANCH=${BRANCH:-feat/$ISSUE}
+TEST_COMMAND=$(fm test_command)
+FEATURE_DOC=$(fm feature_doc)
+DISPATCH_BASE=$(fm dispatch_base)
+[ -d "$WORKTREE" ] || { echo "[$ISSUE] missing worktree: $WORKTREE"; exit 1; }
+[ -n "$TEST_COMMAND" ] || { echo "[$ISSUE] test_command is required before testing"; exit 1; }
+[ -z "$(git -C "$WORKTREE" status --porcelain)" ] || {
+  echo "[$ISSUE] worktree is dirty; commit code and documentation first"; exit 1;
+}
+if [ -f "$WORKTREE/docs/delivery/aars/$ISSUE-draft.md" ]; then
+  "$ROOT/bin/aar-check" "$ISSUE" "$WORKTREE" || {
+    echo "[$ISSUE] WARNING: AAR is incomplete. Testing continues; later dispatch records this optimization debt."
+    KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-log" aar_advisory issue="$ISSUE" result=incomplete 2>/dev/null || true
+  }
+else
+  echo "[$ISSUE] WARNING: no AAR. Testing continues; the ticket and test evidence remain sufficient."
+  KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-log" aar_advisory issue="$ISSUE" result=missing 2>/dev/null || true
+fi
+[ -n "$FEATURE_DOC" ] && [ -f "$WORKTREE/$FEATURE_DOC" ] || {
+  echo "[$ISSUE] linked feature PRD is missing: $FEATURE_DOC"; exit 1;
+}
+[ -n "$DISPATCH_BASE" ] || { echo "[$ISSUE] missing dispatch_base"; exit 1; }
+if ! git -C "$WORKTREE" diff --quiet "$DISPATCH_BASE" -- docs/product docs/architecture; then
+  echo "[$ISSUE] REFUSED: builder changed planner-owned product or architecture documents"
+  echo "Builders may only reference docs/product and docs/architecture."
+  exit 1
+fi
+
+MAIN=main
+git -C "$REPO" fetch origin "$MAIN"
+BASE=$(git -C "$REPO" rev-parse "origin/$MAIN")
+LOCK="$ROOT/.factory/runtime/locks/rebase"
+mkdir -p "$(dirname "$LOCK")"
+if ! mkdir "$LOCK" 2>/dev/null; then
+  echo "[$ISSUE] rebase lock is busy; retry prepare-for-test"
+  exit 1
+fi
+trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+
+if ! git -C "$WORKTREE" rebase "$BASE"; then
+  git -C "$WORKTREE" rebase --abort 2>/dev/null || true
+  sed -i 's/^status: .*/status: REBASE_CONFLICT/' "$TICKET"
+  printf '\n### %s — REBASE_CONFLICT\nRebase onto %s failed. Builder must resolve and rerun READY_FOR_TESTING.\n' \
+    "$(date '+%Y-%m-%d %H:%M')" "$BASE" >> "$TICKET"
+  KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-log" rebase_conflict issue="$ISSUE" base="$BASE" 2>/dev/null || true
+  exit 1
+fi
+rmdir "$LOCK"; trap - EXIT
+
+echo "[$ISSUE] running post-rebase builder tests"
+(cd "$WORKTREE" && bash -lc "$TEST_COMMAND")
+CANDIDATE=$(git -C "$WORKTREE" rev-parse HEAD)
+git -C "$WORKTREE" push --force-with-lease origin "$BRANCH"
+python3 - "$TICKET" "$BASE" "$CANDIDATE" <<'PY'
+import re, sys
+path, base, candidate = sys.argv[1:]
+text = open(path, encoding="utf-8").read()
+for key, value in (("audited_base", base), ("candidate_commit", candidate)):
+    if re.search(rf"^{key}:", text, re.M):
+        text = re.sub(rf"^{key}:.*$", f"{key}: {value}", text, flags=re.M)
+    else:
+        text = text.replace("---\n", f"{key}: {value}\n---\n", 1)
+open(path, "w", encoding="utf-8").write(text)
+PY
+
+KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/kanban-update" "$ISSUE" RUNNING_TESTS \
+  "rebased onto $BASE; post-rebase tests passed; candidate $CANDIDATE"

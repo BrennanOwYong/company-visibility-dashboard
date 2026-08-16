@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "prd_version": 3,
+  "features": [
+    {
+      "id": "account-core",
+      "title": "Account core",
+      "doc": "docs/product/features/account-core.md",
+      "architecture": "docs/architecture/features/account-core.md",
+      "depends_on": [],
+      "subjective_ux": false,
+      "test": {"driver": "browser", "launcher": "true"},
+      "log_command": "printf logs"
+    },
+    {
+      "id": "account-screen",
+      "title": "Account screen",
+      "doc": "docs/product/features/account-screen.md",
+      "architecture": "docs/architecture/features/account-screen.md",
+      "depends_on": ["account-core"],
+      "subjective_ux": true,
+      "test": {"driver": "browser", "launcher": "true"},
+      "log_command": "printf logs"
+    },
+    {
+      "id": "help-screen",
+      "title": "Help screen",
+      "doc": "docs/product/features/help-screen.md",
+      "architecture": "docs/architecture/features/help-screen.md",
+      "depends_on": [],
+      "subjective_ux": true,
+      "test_command": "true",
+      "log_command": "printf logs"
+    }
+  ]
+}

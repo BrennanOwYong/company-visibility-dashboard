@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""Review an optional AAR for useful repeated-step and module-trip-up content."""
+import re, sys
+from pathlib import Path
+if len(sys.argv) != 3:
+    raise SystemExit("usage: aar-check <issue> <worktree>")
+issue, worktree = sys.argv[1:]
+path = Path(worktree) / "docs/delivery/aars" / f"{issue}-draft.md"
+if not path.exists(): raise SystemExit(f"missing AAR draft: {path}")
+text = path.read_text(encoding="utf-8")
+required = ["Repeated module-specific steps", "Skill candidates", "Module trip-ups"]
+missing=[]
+for heading in required:
+    match=re.search(rf"^## {re.escape(heading)}\s*$\n([\s\S]*?)(?=^## |\Z)",text,re.M)
+    if not match or not match.group(1).strip() or "builder fills" in match.group(1).lower(): missing.append(heading)
+if missing: raise SystemExit("AAR draft missing substantive sections: " + ", ".join(missing))
+print(f"{issue} AAR draft: valid")

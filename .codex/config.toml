@@ -1,0 +1,34 @@
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 8
+default_subagent_model = "gpt-5.6-luna"
+default_subagent_reasoning_effort = "medium"
+
+[[hooks.SessionStart]]
+matcher = "^(startup|resume|clear|compact)$"
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = '/usr/bin/python3 "$(git rev-parse --show-toplevel)/.codex/hooks/session_start.py"'
+additionalContextLimit = 6000
+
+[[hooks.PreToolUse]]
+matcher = "^(apply_patch|Edit|Write)$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = '/usr/bin/python3 "$(git rev-parse --show-toplevel)/.codex/hooks/requirements_guard.py"'
+
+[[hooks.UserPromptSubmit]]
+matcher = ".*"
+
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = '/usr/bin/python3 "$(git rev-parse --show-toplevel)/.codex/hooks/agent_state.py"'
+
+[[hooks.Stop]]
+matcher = ".*"
+
+[[hooks.Stop.hooks]]
+type = "command"
+command = '/usr/bin/python3 "$(git rev-parse --show-toplevel)/.codex/hooks/agent_state.py"'

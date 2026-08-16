@@ -1,0 +1,52 @@
+#!/bin/bash
+# Start, stop, or inspect the browser control surface for this project only.
+set -euo pipefail
+ACTION=${1:-start}
+ROOT=${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+STATE="$ROOT/.factory/runtime/ui.json"
+LOG="$ROOT/.factory/runtime/ui.log"
+SESSION="factory-ui-$(printf '%s' "$ROOT" | sha256sum | cut -c1-10)"
+mkdir -p "$ROOT/.factory/runtime"
+KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-preflight" >/dev/null 2>&1 || true
+
+read_field() { python3 - "$STATE" "$1" <<'PY'
+import json,sys
+try: print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))
+except Exception: print("")
+PY
+}
+
+case "$ACTION" in
+  status)
+    [ -f "$STATE" ] || { echo "stopped"; exit 1; }
+    SAVED_SESSION=$(read_field session); PORT=$(read_field port)
+    tmux has-session -t "${SAVED_SESSION:-$SESSION}" 2>/dev/null || { echo "stopped"; exit 1; }
+    echo "http://127.0.0.1:$PORT";;
+  stop)
+    [ -f "$STATE" ] || exit 0
+    SAVED_SESSION=$(read_field session); tmux kill-session -t "${SAVED_SESSION:-$SESSION}" 2>/dev/null || true; rm -f "$STATE";;
+  start)
+    if "$0" status >/dev/null 2>&1; then "$0" status; exit 0; fi
+    PORT=$(python3 - <<'PY'
+import socket
+s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()
+PY
+)
+    tmux new-session -d -s "$SESSION" -c "$ROOT" \
+      "KANBAN_PROJECT_ROOT='$ROOT' KANBAN_UI_PORT='$PORT' node '$ROOT/kanban-ui/server.js' >>'$LOG' 2>&1"
+    python3 - "$STATE" "$SESSION" "$PORT" <<'PY'
+import json,sys,time
+json.dump({"session":sys.argv[2],"port":int(sys.argv[3]),"url":f"http://127.0.0.1:{sys.argv[3]}","started_at":int(time.time())},open(sys.argv[1],"w"),indent=2)
+PY
+    for _ in $(seq 1 40); do
+      if python3 - "$PORT" <<'PY' 2>/dev/null
+import sys,urllib.request
+urllib.request.urlopen(f"http://127.0.0.1:{sys.argv[1]}/",timeout=.2)
+PY
+      then echo "http://127.0.0.1:$PORT"; exit 0; fi
+      sleep .1
+    done
+    tmux kill-session -t "$SESSION" 2>/dev/null || true; rm -f "$STATE"
+    echo "factory-ui: failed to become healthy; see $LOG" >&2; exit 1;;
+  *) echo "Usage: factory-ui start|status|stop"; exit 1;;
+esac

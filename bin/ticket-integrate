@@ -1,0 +1,53 @@
+#!/bin/bash
+# Push the exact tested candidate and open its GitHub pull request. Never merge locally.
+set -euo pipefail
+ISSUE=${1:-}
+ROOT=${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+TICKET="$ROOT/kanban/$ISSUE.md"
+[ -n "$ISSUE" ] && [ -f "$TICKET" ] || { echo "Usage: ticket-integrate <issue>"; exit 1; }
+fm() { grep -m1 "^$1:" "$TICKET" | sed "s/^$1:[[:space:]]*//"; }
+REPO=$(fm repo); REPO=${REPO:-$ROOT}
+WORKTREE=$(fm worktree); BRANCH=$(fm branch); BRANCH=${BRANCH:-feat/$ISSUE}
+CANDIDATE=$(fm candidate_commit); AUDITED_BASE=$(fm audited_base); TITLE=$(fm title)
+[ -d "$WORKTREE" ] || { echo "[$ISSUE] missing worktree"; exit 1; }
+[ "$(git -C "$WORKTREE" rev-parse HEAD)" = "$CANDIDATE" ] || { echo "[$ISSUE] worktree is not the tested candidate"; exit 1; }
+git -C "$REPO" fetch origin main
+[ "$(git -C "$REPO" rev-parse origin/main)" = "$AUDITED_BASE" ] || {
+  echo "[$ISSUE] remote/main changed after testing. Run READY_FOR_TESTING again."; exit 1;
+}
+git -C "$WORKTREE" push --force-with-lease origin "$BRANCH"
+BODY=$(mktemp)
+trap 'rm -f "$BODY"' EXIT
+cat > "$BODY" <<EOF
+## Factory ticket
+
+- Feature requirements: $(fm feature_doc)
+- Technical plan: $(fm architecture_doc)
+- Tested candidate: $CANDIDATE
+- Done-criteria evidence was produced by the local independent tester for candidate $CANDIDATE.
+- The project factory UI retains the detailed criterion, browser-step, event, and quality evidence.
+
+The AAR is advisory. If present: docs/delivery/aars/$ISSUE-draft.md
+EOF
+for REPORT in "$ROOT/kanban/audit/$ISSUE-criteria.md" "$ROOT/kanban/audit/$ISSUE.md"; do
+  if [ -f "$REPORT" ]; then
+    printf '\n<details><summary>%s</summary>\n\n```text\n' "$(basename "$REPORT")" >> "$BODY"
+    sed -n '1,160p' "$REPORT" >> "$BODY"
+    printf '\n```\n</details>\n' >> "$BODY"
+  fi
+done
+PR_URL=$(cd "$WORKTREE" && gh pr view "$BRANCH" --json url --jq .url 2>/dev/null || true)
+if [ -z "$PR_URL" ]; then
+  PR_URL=$(cd "$WORKTREE" && gh pr create --head "$BRANCH" --base main --title "$ISSUE: $TITLE" --body-file "$BODY")
+fi
+python3 - "$TICKET" "$PR_URL" <<'PY'
+import re,sys
+p,url=sys.argv[1:]
+t=open(p,encoding="utf-8").read()
+t=re.sub(r"^status:.*$","status: PR_OPEN",t,flags=re.M)
+if re.search(r"^pr_url:",t,re.M): t=re.sub(r"^pr_url:.*$",f"pr_url: {url}",t,flags=re.M)
+else: t=t.replace("---\n",f"pr_url: {url}\n---\n",1)
+open(p,"w",encoding="utf-8").write(t)
+PY
+KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-log" pull_request_opened issue="$ISSUE" candidate="$CANDIDATE" url="$PR_URL" || true
+echo "[$ISSUE] pull request ready: $PR_URL"

@@ -1,99 +1,10 @@
 #!/bin/bash
-# kanban-done <issue> <user-feedback>
-# Coordinator calls this AFTER the user approves the test card.
-# Closes the ticket, then delegates integration to the builder: rebase-queue opens the PR,
-# serial-rebases feat/<issue> onto main, ff-merges, writes the AAR (kanban-aar), and prompts
-# the builder to mine its session for reusable skills/scripts. Checks the dependency cluster.
-set -e
-
-ISSUE="$1"
-USER_FEEDBACK="${2:-approved}"
-PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(pwd)}"
-KANBAN_DIR="$PROJECT_ROOT/kanban"
-KANBAN_FILE="$KANBAN_DIR/$ISSUE.md"
-
-if [ ! -f "$KANBAN_FILE" ]; then
-  echo "No kanban entry: $KANBAN_FILE"
-  exit 1
-fi
-
-# Record user feedback in the ticket
-printf '\n## Feedback from user\n%s\n' "$USER_FEEDBACK" >> "$KANBAN_FILE"
-
-# Mark DONE via kanban-update
-kanban-update "$ISSUE" "DONE" "Approved by user: $USER_FEEDBACK"
-
-# Integration is the builder's final act: PR + serial rebase onto main + AAR + self-mining.
-# The AAR is written by rebase-queue (via kanban-aar) once the branch lands, not here —
-# an AAR records shipped work. If the builder session is gone, run `rebase-queue $ISSUE`
-# from the coordinator instead.
-if tmux has-session -t "$ISSUE" 2>/dev/null; then
-  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" tmux-delegate "$ISSUE" \
-    "APPROVED: $USER_FEEDBACK — integrate now: run rebase-queue $ISSUE (opens the PR if a remote exists, serial-rebases feat/$ISSUE onto main, ff-merges, writes the AAR). Then follow its self-mining instruction before you finish."
-else
-  echo "[$ISSUE] builder session gone — running rebase-queue here"
-  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" rebase-queue "$ISSUE" || \
-    echo "[$ISSUE] rebase-queue failed — resolve and re-run: rebase-queue $ISSUE"
-fi
-
-# BFS over dependency graph to check if full cluster is now complete
-declare -A visited
-queue=("$ISSUE")
-visited["$ISSUE"]=1
-cluster=("$ISSUE")
-
-while [ ${#queue[@]} -gt 0 ]; do
-  current="${queue[0]}"
-  queue=("${queue[@]:1}")
-
-  if [ -f "$KANBAN_DIR/$current.md" ]; then
-    deps=$(grep "^dependsOn:" "$KANBAN_DIR/$current.md" 2>/dev/null \
-      | sed 's/^dependsOn:[[:space:]]*//' | tr ',' '\n' | tr -d ' []"' | grep -v '^$')
-    for dep in $deps; do
-      if [ -n "$dep" ] && [ -z "${visited[$dep]}" ]; then
-        visited[$dep]=1; cluster+=("$dep"); queue+=("$dep")
-      fi
-    done
-  fi
-
-  for f in "$KANBAN_DIR"/*.md; do
-    [ -f "$f" ] || continue
-    fname=$(basename "$f" .md)
-    [[ "$fname" == *-card ]] || [[ "$fname" == *-aar ]] && continue
-    [ -n "${visited[$fname]}" ] && continue
-    fdeps=$(grep "^dependsOn:" "$f" 2>/dev/null \
-      | sed 's/^dependsOn:[[:space:]]*//' | tr ',' '\n' | tr -d ' []"' | grep -v '^$')
-    if echo "$fdeps" | grep -qx "$current" 2>/dev/null; then
-      visited[$fname]=1; cluster+=("$fname"); queue+=("$fname")
-    fi
-  done
-done
-
-COORDINATOR=$(cat ~/.claude/.coordinator 2>/dev/null)
-
-if [ ${#cluster[@]} -gt 1 ]; then
-  ALL_DONE=true
-  PENDING=()
-  for member in "${cluster[@]}"; do
-    [ "$member" = "$ISSUE" ] && continue
-    member_status=$(grep "^status:" "$KANBAN_DIR/$member.md" 2>/dev/null | awk '{print $2}')
-    if [ "$member_status" != "DONE" ]; then
-      ALL_DONE=false; PENDING+=("$member")
-    fi
-  done
-
-  if $ALL_DONE; then
-    KANBAN_PROJECT_ROOT="$PROJECT_ROOT" kanban-generate-card --group "${cluster[@]}"
-    GROUP_NAME=$(IFS='+'; echo "${cluster[*]}")
-    CARD="$KANBAN_DIR/user-test-cards/${GROUP_NAME}-group-card.md"
-    [ -n "$COORDINATOR" ] && tmux send-keys -t "$COORDINATOR" \
-      "[GROUP CLOSED: ${cluster[*]}] all approved — integrated card: $CARD" Enter
-  else
-    PENDING_STR=$(IFS=', '; echo "${PENDING[*]}")
-    [ -n "$COORDINATOR" ] && tmux send-keys -t "$COORDINATOR" \
-      "[$ISSUE] closed. Cluster pending: [$PENDING_STR]" Enter
-  fi
-else
-  [ -n "$COORDINATOR" ] && tmux send-keys -t "$COORDINATOR" \
-    "[$ISSUE] closed. Integration queued; AAR lands at kanban/aar/$ISSUE-aar.md after the merge." Enter
-fi
+# Record approval and open a GitHub pull request for the exact tested candidate.
+set -euo pipefail
+ISSUE=${1:-}
+FEEDBACK=${2:-approved}
+ROOT=${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+TICKET="$ROOT/kanban/$ISSUE.md"
+[ -n "$ISSUE" ] && [ -f "$TICKET" ] || { echo "Usage: kanban-done <issue> [feedback]"; exit 1; }
+printf '\n## Feedback from user\n%s\n' "$FEEDBACK" >> "$TICKET"
+exec env KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/ticket-integrate" "$ISSUE"

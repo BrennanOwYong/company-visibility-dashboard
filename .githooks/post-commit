@@ -1,0 +1,13 @@
+#!/bin/bash
+# Store every feature-worktree commit on its matching remote branch.
+set -u
+BRANCH=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+case "$BRANCH" in
+  feat/*)
+    git push origin "HEAD:$BRANCH" || {
+      echo "Factory warning: commit exists locally but push to origin/$BRANCH failed." >&2
+      echo "Run: git push origin HEAD:$BRANCH" >&2
+    }
+    ;;
+esac
+exit 0

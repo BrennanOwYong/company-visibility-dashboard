@@ -1,0 +1,139 @@
+#!/bin/bash
+# kanban-audit <issue> axis   <axis> <PASS|FAIL|NA> "<evidence>" [class]
+# kanban-audit <issue> finalize
+# kanban-audit <issue> show
+#
+# The independent audit's tool. It records one per-axis verdict at a time, then finalizes them into
+# kanban/audit/<issue>.md — the independent multi-axis objective-test report.
+# The audit agent (a different agent from the builder) owns this. It reads the ticket, the builder's
+# concrete inventory, the acceptance contract, and the observability stream
+# (kanban/observability/<issue>.jsonl), authors objective checks, runs them, and records each axis.
+#
+# The eight OBJECTIVE axes (the audit agent owns these):
+#   feature   — every acceptance assertion holds on the running system
+#   sdlc      — the SDLC test matrix present + passing (unit, integration, regression, sanity, smoke,
+#               security, performance, ux-consistency). This is "backtesting" in full-SDLC form.
+#   perf      — meets the architecture's perceived-speed budget; no N+1; no unbounded query/loop
+#   security  — input validation at the boundary; parameterized queries; secrets via env; no debug
+#               surface; idempotent webhook ingress; every required external tool functional
+#   arch      — uses provided modules; typed seams (no `any`); matches architecture.md + contracts
+#   ux        — the UX baseline: loading/skeleton, empty/error states, no hydration flash/layout shift,
+#               caching per strategy, optimistic updates where marked safe
+#   design    — named elements exist; layout matches the design criteria; responsive
+#   planning  — no stub/TODO/dead code; every acceptance item mapped; every edge contracted; docs emitted
+#
+# TASTE axes (visual coherence, felt speed, flow, first-time clarity) are NOT scored here — they route
+# to the user gate. The audit records that they are queued, nothing more.
+#
+# class (only on FAIL): builder-defect | test-defect | ticket-underspecified | external
+#   external → the ticket cannot reach DONE; it must go NEEDS_SETUP with the exact need.
+set -e
+
+ISSUE="$1"; CMD="$2"; shift 2 || true
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(pwd)}"
+AUDIT_DIR="$PROJECT_ROOT/kanban/audit"
+mkdir -p "$AUDIT_DIR"
+STATE="$AUDIT_DIR/$ISSUE.axes.json"      # machine state: one entry per recorded axis
+MATRIX="$AUDIT_DIR/$ISSUE.md"            # human-readable matrix + overall verdict
+OBJECTIVE_AXES="feature sdlc perf security arch ux design planning"
+
+if [ -z "$ISSUE" ] || [ -z "$CMD" ]; then
+  echo "Usage: kanban-audit <issue> axis <axis> <PASS|FAIL|NA> \"<evidence>\" [class]"
+  echo "       kanban-audit <issue> finalize | show"
+  exit 1
+fi
+
+case "$CMD" in
+  axis)
+    AXIS="$1"; RESULT="$2"; EVIDENCE="${3:-}"; CLASS="${4:-}"
+    case " $OBJECTIVE_AXES " in *" $AXIS "*) ;; *) echo "invalid axis: $AXIS (one of: $OBJECTIVE_AXES)"; exit 1;; esac
+    case "$RESULT" in PASS|FAIL|NA) ;; *) echo "invalid result: $RESULT (PASS|FAIL|NA)"; exit 1;; esac
+    if [ "$RESULT" = "FAIL" ]; then
+      case "$CLASS" in
+        builder-defect|test-defect|ticket-underspecified|external) ;;
+        *) echo "FAIL requires a class: builder-defect|test-defect|ticket-underspecified|external"; exit 1;;
+      esac
+    fi
+    python3 - "$STATE" "$AXIS" "$RESULT" "$EVIDENCE" "$CLASS" <<'PY'
+import json, sys, os, time
+state_path, axis, result, evidence, cls = sys.argv[1:6]
+st = {}
+if os.path.exists(state_path):
+    with open(state_path) as f: st = json.load(f)
+st[axis] = {"result": result, "evidence": evidence, "class": cls,
+            "iso": time.strftime("%Y-%m-%dT%H:%M:%S")}
+with open(state_path, "w") as f: json.dump(st, f, indent=2)
+PY
+    # Mirror into the observability stream so the axis verdict lives with the evidence trail.
+    KANBAN_PROJECT_ROOT="$PROJECT_ROOT" factory-observe "$ISSUE" axis \
+      "axis=$AXIS" "result=$RESULT" ${CLASS:+"class=$CLASS"} "evidence=$EVIDENCE" >/dev/null
+    echo "[$ISSUE] axis $AXIS = $RESULT${CLASS:+ ($CLASS)}"
+    ;;
+
+  finalize)
+    [ -f "$STATE" ] || { echo "[$ISSUE] no axes recorded yet — run 'kanban-audit $ISSUE axis ...' first"; exit 1; }
+    python3 - "$STATE" "$MATRIX" "$ISSUE" "$OBJECTIVE_AXES" <<'PY'
+import json, sys, time
+state_path, matrix_path, issue, axes_str = sys.argv[1:5]
+axes = axes_str.split()
+with open(state_path) as f: st = json.load(f)
+
+missing = [a for a in axes if a not in st]
+fails   = [a for a in axes if st.get(a, {}).get("result") == "FAIL"]
+external = [a for a in fails if st.get(a, {}).get("class") == "external"]
+
+# Overall verdict: pass only when every objective axis is recorded and none FAIL.
+# An external FAIL is a distinct outcome — the ticket must go NEEDS_SETUP, never DONE.
+if missing:
+    verdict, reason = "fail", "axes not yet recorded: " + ", ".join(missing)
+elif external:
+    verdict, reason = "external", "external (human-held) blocker on: " + ", ".join(external)
+elif fails:
+    verdict, reason = "fail", "objective axes failed: " + ", ".join(fails)
+else:
+    verdict, reason = "pass", "all objective axes PASS or justified NA"
+
+labels = {
+ "feature":"Feature / functional","sdlc":"SDLC test matrix","perf":"Performance",
+ "security":"Security","arch":"Architecture adherence","ux":"UX baseline",
+ "design":"Design & layout","planning":"Planning completeness"}
+mark = {"PASS":"✅","FAIL":"❌","NA":"➖"}
+
+lines = []
+lines.append("---")
+lines.append(f"issue: {issue}")
+lines.append(f"verdict: {verdict}")
+lines.append(f"reason: {reason}")
+lines.append(f"finalized: {time.strftime('%Y-%m-%dT%H:%M:%S')}")
+lines.append("---")
+lines.append("")
+lines.append(f"# Audit matrix — {issue}")
+lines.append("")
+lines.append(f"**Overall: {verdict.upper()}** — {reason}")
+lines.append("")
+lines.append("Objective axes (audit agent owns these). Taste axes route to the user gate.")
+lines.append("")
+lines.append("| Axis | Verdict | Class | Evidence |")
+lines.append("|---|---|---|---|")
+for a in axes:
+    e = st.get(a)
+    if not e:
+        lines.append(f"| {labels[a]} | ⚠ not recorded | | |")
+    else:
+        m = mark.get(e["result"], e["result"])
+        lines.append(f"| {labels[a]} | {m} {e['result']} | {e.get('class','')} | {e.get('evidence','')} |")
+lines.append("")
+lines.append("Taste axes (visual coherence, felt speed, flow intuitiveness, first-time clarity): "
+             "queued to the board Test button for needs_user_test tickets. Not scored here.")
+lines.append("")
+with open(matrix_path, "w") as f: f.write("\n".join(lines))
+print(f"[{issue}] audit finalized: verdict={verdict} — {reason}")
+PY
+    ;;
+
+  show)
+    [ -f "$MATRIX" ] && cat "$MATRIX" || echo "[$ISSUE] no audit matrix yet ($MATRIX)"
+    ;;
+
+  *) echo "unknown command: $CMD (axis|finalize|show)"; exit 1;;
+esac

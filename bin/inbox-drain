@@ -5,7 +5,7 @@
 # drains the next message when it next finishes talking (its Stop hook calls this).
 # This is the readiness gate: no message ever lands on a mid-turn agent.
 AGENT="$1"
-ROOT="${KANBAN_PROJECT_ROOT:-$(cat "$HOME/.claude/.coordinator-root" 2>/dev/null)}"
+ROOT="${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 
 if [ -z "$ROOT" ] || [ -z "$AGENT" ]; then
   exit 0
@@ -47,15 +47,6 @@ printf 'delivering\n' > "$STATE_FILE"
 tmux send-keys -t "$AGENT" -l -- "$MSG"
 sleep 1
 tmux send-keys -t "$AGENT" Enter
-
-# Test-mode short-circuit: with a stubbed CLI (CLAUDE_BIN != claude, e.g. smoke-test) there is no
-# real TUI to show an active-turn marker, so the poll below would spin the full window on every
-# delivery. The stub only needs the send-keys to have fired; mark busy and return.
-if [ "${CLAUDE_BIN:-claude}" != "claude" ]; then
-  printf 'busy\n' > "$STATE_FILE"
-  echo "[drain] (test stub) delivered -> $AGENT"
-  exit 0
-fi
 
 # Submission is confirmed by the TUI's OWN active-turn marker, not by the state file. The
 # canonical delivery bug: when the Enter is swallowed (a boot/redraw/modal was showing when the

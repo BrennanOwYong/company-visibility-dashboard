@@ -1,0 +1,180 @@
+#!/usr/bin/env python3
+"""Validate the planner roadmap and synchronize ready-state data for the Kanban UI."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+ID = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+REQUIRED_HEADINGS = (
+    "Purpose",
+    "User outcome",
+    "Scope and non-goals",
+    "Positive flow",
+    "Negative and recovery flow",
+    "User inputs and visible outcomes",
+    "Done outcomes",
+    "Subjective user-test questions",
+    "Applicable principles",
+)
+
+
+def fail(message: str) -> None:
+    print(f"roadmap-sync: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def load_roadmap(root: Path) -> dict:
+    path = root / "docs/architecture/roadmap.json"
+    if not path.exists():
+        fail(f"missing {path}")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        fail(f"invalid roadmap JSON: {exc}")
+
+
+def validate(root: Path, roadmap: dict) -> tuple[list[dict], dict[str, int]]:
+    features = roadmap.get("features")
+    if not isinstance(features, list):
+        fail("roadmap.features must be an array")
+    by_id: dict[str, dict] = {}
+    order: list[str] = []
+    for feature in features:
+        if not isinstance(feature, dict):
+            fail("each feature must be an object")
+        feature_id = feature.get("id", "")
+        if not ID.fullmatch(feature_id):
+            fail(f"invalid feature id: {feature_id!r}")
+        if feature_id in by_id:
+            fail(f"duplicate feature id: {feature_id}")
+        doc = feature.get("doc", "")
+        expected = f"docs/product/features/{feature_id}.md"
+        if doc != expected:
+            fail(f"{feature_id}: doc must be {expected}")
+        doc_path = root / doc
+        if not doc_path.exists():
+            fail(f"{feature_id}: missing mini-PRD {doc}")
+        text = doc_path.read_text(encoding="utf-8")
+        missing = [heading for heading in REQUIRED_HEADINGS if f"## {heading}" not in text]
+        if missing:
+            fail(f"{feature_id}: mini-PRD missing headings: {', '.join(missing)}")
+        architecture = feature.get("architecture", "")
+        expected_arch = f"docs/architecture/features/{feature_id}.md"
+        if architecture != expected_arch or not (root / architecture).exists():
+            fail(f"{feature_id}: architecture must reference existing {expected_arch}")
+        deps = feature.get("depends_on", [])
+        if not isinstance(deps, list) or any(not isinstance(dep, str) for dep in deps):
+            fail(f"{feature_id}: depends_on must be an array of IDs")
+        by_id[feature_id] = feature
+        order.append(feature_id)
+    for feature_id, feature in by_id.items():
+        for dep in feature.get("depends_on", []):
+            if dep not in by_id:
+                fail(f"{feature_id}: dangling dependency {dep}")
+            if dep == feature_id:
+                fail(f"{feature_id}: self dependency")
+
+    indegree = {feature_id: 0 for feature_id in order}
+    children = {feature_id: [] for feature_id in order}
+    levels = {feature_id: 0 for feature_id in order}
+    for feature_id, feature in by_id.items():
+        for dep in feature.get("depends_on", []):
+            indegree[feature_id] += 1
+            children[dep].append(feature_id)
+    queue = [feature_id for feature_id in order if indegree[feature_id] == 0]
+    visited = []
+    while queue:
+        current = queue.pop(0)
+        visited.append(current)
+        for child in children[current]:
+            levels[child] = max(levels[child], levels[current] + 1)
+            indegree[child] -= 1
+            if indegree[child] == 0:
+                queue.append(child)
+    if len(visited) != len(order):
+        fail("dependency cycle detected")
+    return [by_id[feature_id] for feature_id in order], levels
+
+
+def ticket_text(root: Path, feature: dict) -> str:
+    feature_id = feature["id"]
+    depends = ",".join(feature.get("depends_on", []))
+    title = feature.get("title", feature_id)
+    user_test = str(bool(feature.get("subjective_ux", False))).lower()
+    repo = feature.get("repo", str(root))
+    test = feature.get("test", {})
+    launcher = test.get("launcher", feature.get("test_command", "")) if isinstance(test, dict) else ""
+    driver = test.get("driver", "code") if isinstance(test, dict) else "code"
+    return f"""---
+issue: {feature_id}
+feature: {feature_id}
+title: {title}
+status: NOT_STARTED
+repo: {repo}
+branch:
+worktree:
+dispatch_base:
+audited_base:
+candidate_commit:
+merged_commit:
+port:
+dependsOn: {depends}
+needsInfra: {','.join(feature.get('needs_infra', []))}
+needs_user_test: {user_test}
+test_command: {launcher}
+test_driver: {driver}
+log_command: {feature.get('log_command', '')}
+feature_doc: {feature['doc']}
+architecture_doc: {feature['architecture']}
+---
+"""
+
+
+def sync(root: Path, features: list[dict], levels: dict[str, int]) -> None:
+    kanban = root / "kanban"
+    kanban.mkdir(exist_ok=True)
+    for child in ("audit", "validation", "observability", "user-test-cards"):
+        (kanban / child).mkdir(exist_ok=True)
+    nodes = []
+    edges = []
+    for feature in features:
+        feature_id = feature["id"]
+        runtime_ticket = kanban / f"{feature_id}.md"
+        if not runtime_ticket.exists():
+            runtime_ticket.write_text(ticket_text(root, feature), encoding="utf-8")
+        status = "NOT_STARTED"
+        if runtime_ticket.exists():
+            match = re.search(r"^status:\s*(\S+)", runtime_ticket.read_text(encoding="utf-8"), re.M)
+            if match:
+                status = match.group(1)
+        deps = feature.get("depends_on", [])
+        nodes.append({"id": feature_id, "title": feature.get("title", feature_id),
+                      "doc": feature["doc"], "architecture": feature["architecture"],
+                      "ticket": f"kanban/{feature_id}.md", "status": status,
+                      "level": levels[feature_id], "wave": levels[feature_id],
+                      "requires": deps, "gate": "AND",
+                      "needs_user_test": bool(feature.get("subjective_ux", False))})
+        edges.extend({"from": dep, "to": feature_id, "rel": "prerequisite_of"} for dep in deps)
+    graph = {"version": 1, "source": "docs/architecture/roadmap.json", "nodes": nodes, "edges": edges}
+    (kanban / "graph.json").write_text(json.dumps(graph, indent=2) + "\n", encoding="utf-8")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--sync-kanban", action="store_true")
+    parser.add_argument("--root", default=".")
+    args = parser.parse_args()
+    root = Path(args.root).resolve()
+    features, levels = validate(root, load_roadmap(root))
+    if args.sync_kanban:
+        sync(root, features, levels)
+    print(json.dumps({"valid": True, "features": len(features), "levels": levels}, indent=2))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,45 @@
+#!/bin/bash
+# Create a complete human-action document for a proven external blocker.
+set -euo pipefail
+ISSUE=${1:-}; shift || true
+NEED="$*"
+ROOT=${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+TICKET="$ROOT/kanban/$ISSUE.md"
+[ -f "$TICKET" ] && [ -n "$NEED" ] || { echo "Usage: setup-request <issue> <exact need>"; exit 1; }
+OUT="$ROOT/docs/delivery/tickets/$ISSUE-setup.md"
+mkdir -p "$(dirname "$OUT")"
+cat > "$OUT" <<EOF
+---
+issue: $ISSUE
+status: NEEDS_SETUP
+created: $(date -Iseconds)
+---
+
+# Setup required: $ISSUE
+
+## Blocked done criteria
+
+List the DC-* criteria blocked by this external requirement in the ticket update.
+
+## Exact requirement
+
+$NEED
+
+## Why an agent cannot complete it
+
+This state is valid only for a human-held credential, account, access grant, physical device, or
+external approval. The testing agent must attach evidence that autonomous setup was attempted.
+
+## Required human action
+
+Complete the provider-specific steps stated in the ticket evidence. Do not paste secrets into this
+document, the ticket, logs, or the message bus. Store secrets in the project-approved secret store.
+
+## Resume
+
+Run `KANBAN_PROJECT_ROOT="$ROOT" kanban-resolved "$ISSUE"` after the requirement is available.
+EOF
+KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-notify" coordinator \
+  "[$ISSUE] needs external setup. Read docs/delivery/tickets/$ISSUE-setup.md" || true
+echo "$OUT"
+

@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""Record and finalize immutable done-criterion verdicts for one ticket."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from datetime import datetime
+from pathlib import Path
+
+
+def root() -> Path:
+    import os
+    return Path(os.environ.get("KANBAN_PROJECT_ROOT", ".")).resolve()
+
+
+def criterion_ids(feature: Path) -> list[str]:
+    ids = re.findall(r"^#{2,4}\s+(DC-[A-Za-z0-9-]+)\b", feature.read_text(encoding="utf-8"), re.M)
+    return list(dict.fromkeys(ids))
+
+
+def load(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("issue")
+    sub = parser.add_subparsers(dest="command", required=True)
+    record = sub.add_parser("record")
+    record.add_argument("criterion")
+    record.add_argument("verdict", choices=("PASS", "FAIL", "BLOCKED"))
+    record.add_argument("--test", required=True)
+    record.add_argument("--evidence", required=True)
+    record.add_argument("--events", required=True)
+    record.add_argument("--kind", choices=("code", "api", "browser"), default="code")
+    record.add_argument("--steps", default="", help="Browser steps or path to browser-step evidence")
+    record.add_argument("--journey", action="append", choices=("positive", "negative", "recovery"), default=[])
+    record.add_argument("--failure-class", choices=("", "builder-defect", "test-defect", "ticket-underspecified", "contract-conflict", "external"), default="")
+    sub.add_parser("finalize")
+    sub.add_parser("show")
+    args = parser.parse_args()
+
+    project = root()
+    ticket = project / "kanban" / f"{args.issue}.md"
+    if not ticket.exists():
+        raise SystemExit(f"criterion-audit: missing ticket {ticket}")
+    match = re.search(r"^feature_doc:\s*(\S+)", ticket.read_text(encoding="utf-8"), re.M)
+    if not match:
+        raise SystemExit("criterion-audit: thin ticket has no feature_doc link")
+    feature = project / match.group(1)
+    if not feature.exists():
+        raise SystemExit(f"criterion-audit: missing product feature {feature}")
+    expected = criterion_ids(feature)
+    if not expected:
+        raise SystemExit("criterion-audit: linked product feature has no ### DC-* outcomes")
+    audit_dir = project / "kanban" / "audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    state_path = audit_dir / f"{args.issue}.criteria.json"
+    report_path = audit_dir / f"{args.issue}-criteria.md"
+    state = load(state_path)
+
+    if args.command == "record":
+        if args.criterion not in expected:
+            raise SystemExit(f"criterion-audit: {args.criterion} is not in the immutable product feature")
+        if args.verdict != "PASS" and not args.failure_class:
+            raise SystemExit("criterion-audit: FAIL/BLOCKED requires --failure-class")
+        if args.kind == "browser" and not args.steps:
+            raise SystemExit("criterion-audit: browser evidence requires --steps")
+        if args.kind == "browser" and not args.journey:
+            raise SystemExit("criterion-audit: browser evidence requires --journey")
+        state[args.criterion] = {"verdict": args.verdict, "kind": args.kind, "test": args.test,
+                                 "steps": args.steps, "journeys": args.journey,
+                                 "evidence": args.evidence, "events": args.events,
+                                 "failure_class": args.failure_class,
+                                 "recorded": datetime.now().isoformat(timespec="seconds")}
+        state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+        print(f"[{args.issue}] {args.criterion} = {args.verdict}")
+        return
+    if args.command == "show":
+        print(report_path.read_text(encoding="utf-8") if report_path.exists() else "no finalized criterion audit")
+        return
+
+    missing = [item for item in expected if item not in state]
+    driver = ""
+    driver_match = re.search(r"^test_driver:\s*(\S+)", ticket.read_text(encoding="utf-8"), re.M)
+    if driver_match: driver = driver_match.group(1)
+    if driver == "browser":
+        covered = {journey for entry in state.values() for journey in entry.get("journeys", [])}
+        for required_journey in ("positive", "negative"):
+            if required_journey not in covered:
+                missing.append(f"browser-{required_journey}-journey")
+    blocked = [item for item in expected if state.get(item, {}).get("verdict") == "BLOCKED"]
+    failed = [item for item in expected if state.get(item, {}).get("verdict") == "FAIL"]
+    external = [item for item in blocked + failed if state[item].get("failure_class") == "external"]
+    verdict = "pass" if not missing and not blocked and not failed else "external" if external else "fail"
+    reason = "all done criteria passed" if verdict == "pass" else \
+        f"missing={missing}; failed={failed}; blocked={blocked}"
+    lines = ["---", f"issue: {args.issue}", f"verdict: {verdict}", f"reason: {reason}", "---", "",
+             f"# Done-criteria audit: {args.issue}", "", "| Criterion | Verdict | Kind | Test or journey | Steps | Event evidence | Evidence | Class |",
+             "|---|---|---|---|---|---|---|---|"]
+    for item in expected:
+        entry = state.get(item, {})
+        lines.append(f"| {item} | {entry.get('verdict', 'NOT_RECORDED')} | {entry.get('kind', '')} | "
+                     f"{entry.get('test', '')} | {','.join(entry.get('journeys', []))}: {entry.get('steps', '')} | {entry.get('events', '')} | "
+                     f"{entry.get('evidence', '')} | {entry.get('failure_class', '')} |")
+    report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"[{args.issue}] criterion audit finalized: {verdict}")
+    if verdict != "pass":
+        raise SystemExit(2)
+
+
+if __name__ == "__main__":
+    main()

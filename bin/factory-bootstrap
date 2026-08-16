@@ -1,0 +1,59 @@
+#!/bin/bash
+# Initialize one project-local Codex factory against its GitHub product repository.
+set -euo pipefail
+
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+GITHUB_URL=${1:-}
+if [ -z "$GITHUB_URL" ]; then
+  echo "Usage: factory-bootstrap <github-repository-url>"
+  exit 1
+fi
+case "$GITHUB_URL" in
+  https://github.com/*|git@github.com:*) ;;
+  *) echo "factory-bootstrap: expected a GitHub repository URL"; exit 1;;
+esac
+
+mkdir -p "$ROOT/.factory/runtime/agents" "$ROOT/.factory/runtime/inbox" \
+  "$ROOT/.factory/runtime/locks" "$ROOT/.factory/runtime/ports" "$ROOT/.factory/events" \
+  "$ROOT/docs/product/features" "$ROOT/docs/product/decisions" \
+  "$ROOT/docs/architecture/modules" "$ROOT/docs/architecture/contracts/api" \
+  "$ROOT/docs/architecture/contracts/events" "$ROOT/docs/architecture/contracts/interfaces" \
+  "$ROOT/docs/architecture/decisions" "$ROOT/docs/delivery/tickets" \
+  "$ROOT/docs/delivery/audits" "$ROOT/docs/delivery/aars" \
+  "$ROOT/docs/delivery/improvement-candidates" "$ROOT/kanban" "$ROOT/kanban/audit" \
+  "$ROOT/kanban/validation" "$ROOT/kanban/observability" "$ROOT/kanban/user-test-cards"
+mkdir -p "$ROOT/.factory/runtime/environments"
+
+PROJECT_ID=$(python3 -c 'import uuid; print(uuid.uuid4())')
+python3 - "$ROOT/.factory/project.json" "$PROJECT_ID" "$GITHUB_URL" <<'PY'
+import json, sys
+path, project_id, github = sys.argv[1:]
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump({"version": 1, "project_id": project_id, "github": github,
+               "default_branch": "main", "docs_root": "docs",
+               "runtime_root": ".factory/runtime"}, handle, indent=2)
+    handle.write("\n")
+PY
+
+if git -C "$ROOT" remote get-url origin >/dev/null 2>&1; then
+  OLD_ORIGIN=$(git -C "$ROOT" remote get-url origin)
+  if [ "$OLD_ORIGIN" != "$GITHUB_URL" ]; then
+    if ! git -C "$ROOT" remote get-url factory-template >/dev/null 2>&1; then
+      git -C "$ROOT" remote add factory-template "$OLD_ORIGIN"
+    fi
+    git -C "$ROOT" remote set-url origin "$GITHUB_URL"
+  fi
+else
+  git -C "$ROOT" remote add origin "$GITHUB_URL"
+fi
+git -C "$ROOT" config core.hooksPath .githooks
+
+if [ ! -f "$ROOT/docs/architecture/roadmap.json" ]; then
+  printf '{\n  "schema_version": 1,\n  "prd_version": 1,\n  "features": []\n}\n' > "$ROOT/docs/architecture/roadmap.json"
+fi
+
+echo "FACTORY READY | project_id=$PROJECT_ID | github=$GITHUB_URL"
+KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-preflight" >/dev/null 2>&1 || true
+UI_URL=$(KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-ui" start 2>/dev/null || true)
+[ -n "$UI_URL" ] && echo "Project UI: $UI_URL"
+echo "Next: commit product and architecture documents on local main, define bin/project-test, then run bin/roadmap-sync --sync-kanban"

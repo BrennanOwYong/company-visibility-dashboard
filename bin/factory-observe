@@ -1,0 +1,55 @@
+#!/bin/bash
+# factory-observe <issue> <kind> [key=value ...]
+#
+# Test-time observability + telemetry recorder. Appends one structured event per call to
+# kanban/observability/<issue>.jsonl — the durable evidence stream the audit reads to compute
+# "done". Both the builder (self-tests, infra checks, perf samples) and the audit agent (authored
+# tests, per-axis verdicts) write to it. Status transitions stay in kanban/telemetry.jsonl
+# (kanban-update); this file holds the finer-grained build/test events under one ticket.
+#
+# kind is one of:
+#   test    — a test ran. keys: axis, name, result(pass|fail|skip), evidence, ms
+#   metric  — a measured value. keys: axis, name, value, unit, budget, result(pass|fail)
+#   infra   — an external tool/integration check. keys: name, result(functional|missing|error),
+#             who (who provides it if missing), evidence
+#   axis    — a rolled-up per-axis verdict. keys: axis, result(PASS|FAIL|NA), class, evidence
+#   log     — a pointer to a build/runtime log. keys: name, path, evidence
+#   note    — free-form observation. keys: any
+#
+# axis (the definition-of-done axes): feature | sdlc | perf | security | arch | ux | design | planning
+#
+# Read the stream:  cat kanban/observability/<issue>.jsonl
+# Roll up a matrix: kanban-audit <issue> finalize
+set -e
+
+ISSUE="$1"; KIND="$2"; shift 2 || true
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(pwd)}"
+
+if [ -z "$ISSUE" ] || [ -z "$KIND" ]; then
+  echo "Usage: factory-observe <issue> <test|metric|infra|axis|log|note> [key=value ...]"
+  exit 1
+fi
+case "$KIND" in
+  test|metric|infra|axis|log|note) ;;
+  *) echo "factory-observe: invalid kind '$KIND' (test|metric|infra|axis|log|note)"; exit 1;;
+esac
+
+OBS_DIR="$PROJECT_ROOT/kanban/observability"
+mkdir -p "$OBS_DIR"
+OBS_FILE="$OBS_DIR/$ISSUE.jsonl"
+TS=$(date +%s%3N 2>/dev/null || python3 -c "import time;print(int(time.time()*1000))" 2>/dev/null || echo 0)
+
+# Build the JSON object from ts/issue/kind plus every key=value pair, JSON-escaping values.
+python3 - "$TS" "$ISSUE" "$KIND" "$@" <<'PY' >> "$OBS_FILE"
+import json, sys, time
+ts, issue, kind = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+d = {"ts": ts, "iso": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(ts/1000)),
+     "issue": issue, "kind": kind}
+for kv in sys.argv[4:]:
+    if "=" in kv:
+        k, v = kv.split("=", 1)
+        d[k] = v
+print(json.dumps(d))
+PY
+
+echo "[$ISSUE] observed: $KIND ${*:+($*)}"

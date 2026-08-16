@@ -1,6 +1,6 @@
 #!/bin/bash
 # spawn-agent <agent-name> [initial message...]
-# Launches a Claude Code session running AS the named .claude/agents/<name> agent,
+# Launches a Codex session for a named role,
 # in the project root, inside a tmux session, then delivers an optional kickoff
 # message through the delegation queue once the session is idle.
 # Idempotent: if the session already exists it only (re)delivers the message.
@@ -10,27 +10,25 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 AGENT="$1"; shift || true
 MSG="$*"
-PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(cat "$HOME/.claude/.coordinator-root" 2>/dev/null || pwd)}"
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 
 if [ -z "$AGENT" ]; then
   echo "Usage: spawn-agent <agent-name> [message]"
   exit 1
 fi
 
-# The agent name becomes a tmux session and a claude --agent target — validate it.
-# (A builder once ran `spawn-agent --help`, which spawned a session literally named
-# "--help" running `claude --agent --help`.)
+# The agent name becomes a tmux session. Validate it.
 case "$AGENT" in -*)
   echo "Usage: spawn-agent <agent-name> [message]"
-  echo "Agents available: $(ls "$PROJECT_ROOT/.claude/agents/" 2>/dev/null | sed 's/\.md$//' | tr '\n' ' ')"
+  echo "Agents available: $(ls "$PROJECT_ROOT/.codex/agents/" 2>/dev/null | sed 's/\.toml$//' | tr '\n' ' ')"
   exit 1;;
 esac
 # Only enforce the known-agent check when an agents registry actually exists (a real factory
 # root). A throwaway/test root with no .claude/agents/ dir is a degraded mode, not an error —
 # the dash-prefix guard above still blocks the `--help`-style footgun everywhere.
-if [ -d "$PROJECT_ROOT/.claude/agents" ] && [ ! -f "$PROJECT_ROOT/.claude/agents/$AGENT.md" ]; then
-  echo "Unknown agent '$AGENT' — no $PROJECT_ROOT/.claude/agents/$AGENT.md"
-  echo "Agents available: $(ls "$PROJECT_ROOT/.claude/agents/" 2>/dev/null | sed 's/\.md$//' | tr '\n' ' ')"
+if [ -d "$PROJECT_ROOT/.codex/agents" ] && [ ! -f "$PROJECT_ROOT/.codex/agents/$AGENT.toml" ]; then
+  echo "Unknown agent '$AGENT' — no $PROJECT_ROOT/.codex/agents/$AGENT.toml"
+  echo "Agents available: $(ls "$PROJECT_ROOT/.codex/agents/" 2>/dev/null | sed 's/\.toml$//' | tr '\n' ' ')"
   exit 1
 fi
 
@@ -40,22 +38,13 @@ if ! tmux has-session -t "$AGENT" 2>/dev/null; then
   tmux new-session -d -s "$AGENT" -c "$PROJECT_ROOT" \
     -e "PATH=$PROJECT_ROOT/bin:$PATH" \
     -e "KANBAN_PROJECT_ROOT=$PROJECT_ROOT" \
-    -e "FACTORY_AGENT=$AGENT" \
-    -e "CLAUDE_CODE_SUBAGENT_MODEL=${FACTORY_SUBAGENT_MODEL:-sonnet}"
-  # CLAUDE_BIN override exists for testing; defaults to the real CLI
-  tmux send-keys -t "$AGENT" "${CLAUDE_BIN:-claude} --dangerously-skip-permissions --agent $AGENT" Enter
+    -e "FACTORY_AGENT=$AGENT"
+  tmux send-keys -t "$AGENT" "codex --dangerously-bypass-approvals-and-sandbox -m ${FACTORY_PLANNING_MODEL:-gpt-5.6-sol}" Enter
   # The idle mark IS the delivery gate (inbox-drain only delivers to idle sessions), so it
   # must wait for the TUI to actually be input-ready — a fixed sleep raced cold boots and let
   # messages be typed into a half-started session, where they were silently swallowed.
   BOOT_DEADLINE=$(( $(date +%s) + ${AGENT_BOOT_SECONDS:-90} ))
-  if [ "${CLAUDE_BIN:-claude}" = "claude" ]; then
-    until tmux capture-pane -pJ -t "$AGENT" -S -30 2>/dev/null | grep -qE "bypass permissions|shift\+tab|esc to interrupt"; do
-      sleep 2
-      [ "$(date +%s)" -ge "$BOOT_DEADLINE" ] && { echo "[spawn] WARNING: $AGENT TUI not ready after ${AGENT_BOOT_SECONDS:-90}s; marking idle anyway"; break; }
-    done
-  else
-    sleep 1   # stubbed CLI in tests: nothing to wait for
-  fi
+  sleep 1
   KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/agent-state" "$AGENT" idle
   KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/factory-log" agent_spawned agent="$AGENT"
 fi

@@ -5,11 +5,13 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { execFileSync } = require('child_process');
 
 const UI_PORT = process.env.KANBAN_UI_PORT || 2999;
 const PROJECT_ROOT = process.env.KANBAN_PROJECT_ROOT || process.cwd();
 const KANBAN_DIR = path.join(PROJECT_ROOT, 'kanban');
-const KNOWLEDGE_DIR = path.join(PROJECT_ROOT, 'knowledge');
+const ROADMAP_FILE = path.join(PROJECT_ROOT, 'docs', 'architecture', 'roadmap.json');
+const PREFLIGHT_FILE = path.join(PROJECT_ROOT, '.factory', 'runtime', 'preflight.json');
 
 // ── Live push (Server-Sent Events): the server watches the kanban dir and PUSHES a "changed"
 // signal to every open browser the moment a ticket file / graph.json / card changes. No client
@@ -22,6 +24,30 @@ function watchForPush(dir) {
 }
 watchForPush(KANBAN_DIR);
 { const cd = path.join(KANBAN_DIR, 'user-test-cards'); if (fs.existsSync(cd)) watchForPush(cd); }
+for (const rel of ['audit', 'validation', 'observability']) {
+  const dir = path.join(KANBAN_DIR, rel); if (fs.existsSync(dir)) watchForPush(dir);
+}
+const eventDir = path.join(PROJECT_ROOT, '.factory', 'events');
+if (fs.existsSync(eventDir)) watchForPush(eventDir);
+const runtimeDir = path.join(PROJECT_ROOT, '.factory', 'runtime');
+if (fs.existsSync(runtimeDir)) watchForPush(runtimeDir);
+
+// GitHub is outside the local file system. Poll only its pull-request state. A merge causes
+// github-sync to update local ticket files; those file events then push the UI update by SSE.
+setInterval(() => {
+  const sync = path.join(PROJECT_ROOT, 'bin', 'github-sync');
+  if (fs.existsSync(sync)) {
+    const child = spawn(sync, [], {cwd: PROJECT_ROOT, stdio: 'ignore', env: {...process.env, KANBAN_PROJECT_ROOT: PROJECT_ROOT}});
+    child.on('error', () => {});
+  }
+}, 15000).unref();
+setInterval(() => {
+  const preflight = path.join(PROJECT_ROOT, 'bin', 'factory-preflight');
+  if (fs.existsSync(preflight)) {
+    const child = spawn(preflight, [], {cwd: PROJECT_ROOT, stdio: 'ignore', env: {...process.env, KANBAN_PROJECT_ROOT: PROJECT_ROOT}});
+    child.on('error', () => {});
+  }
+}, 30000).unref();
 
 // Shared client script: subscribe to the push stream. A page may define window.__onLive to update
 // in place (the graph does); otherwise it reloads — but ONLY on a real change, never on a timer.
@@ -110,10 +136,18 @@ function parseTestCard(text) {
   return sections;
 }
 
+function readRoadmap() {
+  try {
+    const data = JSON.parse(fs.readFileSync(ROADMAP_FILE, 'utf8'));
+    return Array.isArray(data.features) ? data.features : [];
+  } catch { return []; }
+}
+
 // ── Ticket reading ───────────────────────────────────────────────────────────
 
 function readTickets() {
   if (!fs.existsSync(KANBAN_DIR)) return [];
+  const roadmap = Object.fromEntries(readRoadmap().map((f, index) => [f.id, {...f, order:index}]));
   return fs.readdirSync(KANBAN_DIR)
     .filter(f => f.endsWith('.md'))
     .map(f => {
@@ -121,26 +155,30 @@ function readTickets() {
       const text = fs.readFileSync(fp, 'utf8');
       const fm = parseFrontmatter(text);
       const id = fm.issue || path.basename(f, '.md');
+      const plan = roadmap[id] || {};
       const cardPath = path.join(KANBAN_DIR, 'user-test-cards', `${id}-card.md`);
       // Completion sections hold "(builder fills this in)" until the builder writes them —
       // a placeholder is not content.
       const rawBuilt = parseSection(text, 'What was built');
       return {
         issue: id,
-        feature: fm.feature || '',
-        title: fm.title || '',
+        feature: id,
+        title: plan.title || fm.title || '',
         status: fm.status || 'NOT_STARTED',
-        needs_user_test: (fm.needs_user_test || 'true').trim() !== 'false',
+        needs_user_test: typeof plan.subjective_ux === 'boolean' ? plan.subjective_ux : (fm.needs_user_test || 'true').trim() !== 'false',
         port: fm.port || '',
         test_command: fm.test_command || '',
-        dependsOn: fm.dependsOn || '',
+        dependsOn: Array.isArray(plan.depends_on) ? plan.depends_on.join(',') : '',
+        feature_doc: plan.doc || fm.feature_doc || '',
+        architecture_doc: plan.architecture || fm.architecture_doc || '',
+        order: plan.order ?? 999999,
         intent: parseSection(text, 'Intent'),
         whatBuilt: /\(builder fills/.test(rawBuilt) ? '' : rawBuilt,
         tests: (text.match(/^- \[x\].*$/gm) || []),
         lastUpdate: (text.match(/^### .+$/gm) || []).slice(-1)[0] || '',
         testCard: fs.existsSync(cardPath) ? parseTestCard(fs.readFileSync(cardPath, 'utf8')) : null,
       };
-    });
+    }).sort((a,b) => a.order - b.order);
 }
 
 // ── HTML escaping ─────────────────────────────────────────────────────────────
@@ -163,7 +201,8 @@ function renderDeps(raw, allTickets) {
   const badges = deps.map(d => {
     const dep = allTickets && allTickets.find(t => t.issue === d);
     const anchor = dep && dep.feature ? `#${dep.feature}` : '';
-    return `<a class="dep-badge" href="/prd${anchor}">${esc(d)}</a>`;
+    const rel = dep && dep.feature_doc ? dep.feature_doc : `docs/product/features/${d}.md`;
+    return `<a class="dep-badge" href="/file?path=${encodeURIComponent(rel)}">${esc(d)}</a>`;
   }).join('');
   return `<div class="deps">depends on ${badges}</div>`;
 }
@@ -174,7 +213,7 @@ function renderTestCardBlock(card, test_command, feature, issue, context, needsU
   const nut = needsUserTest !== false;
 
   const featureLink = feature
-    ? `<a class="tc-feature-link" href="/prd#${esc(feature)}">${esc(feature)} ↗</a>` : '';
+    ? `<a class="tc-feature-link" href="/file?path=${encodeURIComponent(`docs/product/features/${feature}.md`)}">${esc(feature)} ↗</a>` : '';
 
   const feedbackForm = `
     <div class="feedback-form" id="fb-${esc(issue)}" style="display:none">
@@ -242,7 +281,7 @@ function renderTestCardBlock(card, test_command, feature, issue, context, needsU
 }
 
 function renderTicketCard(t, context, allTickets) {
-  const featureHref = t.feature ? `/prd#${esc(t.feature)}` : '/prd';
+  const featureHref = t.feature_doc ? `/file?path=${encodeURIComponent(t.feature_doc)}` : '/prd';
   const title = t.title ? `<p class="ticket-title">${esc(t.title)}</p>` : '';
   // Before completion, the brief's Intent is the ticket's description; once the builder
   // writes What-was-built, that takes over.
@@ -252,6 +291,7 @@ function renderTicketCard(t, context, allTickets) {
   const last = t.lastUpdate
     ? `<div class="last">${esc(t.lastUpdate.replace(/^### /, ''))}</div>` : '';
 
+  const setup = t.status === 'NEEDS_SETUP' ? `<div class="test-card"><a class="tc-feature-link" href="/file?path=${encodeURIComponent(`docs/delivery/tickets/${t.issue}-setup.md`)}">Setup instructions ↗</a><button class="launch-btn" onclick="resolveSetup('${esc(t.issue)}')">I completed the setup</button></div>` : '';
   return `<div class="ticket" id="ticket-${esc(t.issue)}">
     <div class="ticket-header">
       <span class="issue">${esc(t.issue)}</span>
@@ -261,11 +301,21 @@ function renderTicketCard(t, context, allTickets) {
     ${desc}
     ${renderDeps(t.dependsOn, allTickets)}
     ${last}
+    ${setup}
     ${renderTestCardBlock(t.testCard, t.test_command, t.feature, t.issue, context, t.needs_user_test)}
   </div>`;
 }
 
 // ── Page render ───────────────────────────────────────────────────────────────
+
+function renderPreflight() {
+  let report;
+  try { report = JSON.parse(fs.readFileSync(PREFLIGHT_FILE, 'utf8')); } catch { return ''; }
+  const blockers = (report.checks || []).filter(c => c.status === 'blocked');
+  if (!blockers.length) return `<section style="margin:14px 20px 0;padding:12px 16px;border:1px solid #14532d;background:#052e1b;color:#86efac;border-radius:8px;font-size:12px">Preflight ready. Required project tools and access are available.</section>`;
+  const rows = blockers.map(c => `<li style="margin:8px 0"><strong>${esc(c.label)}:</strong> ${esc(c.detail)}${c.action ? `<div style="color:#fecaca;margin-top:3px">Action: ${esc(c.action)}</div>` : ''}</li>`).join('');
+  return `<section style="margin:14px 20px 0;padding:14px 18px;border:1px solid #991b1b;background:#3f0d12;color:#fee2e2;border-radius:8px"><strong>Human action required before dispatch</strong><ul style="margin:8px 0 0 18px">${rows}</ul></section>`;
+}
 
 function renderPage(tickets) {
   const projectName = path.basename(PROJECT_ROOT);
@@ -276,7 +326,7 @@ function renderPage(tickets) {
   const needsReview  = tickets.filter(t => t.status === 'NEEDS_TESTING' || t.status === 'NEEDS_USER_TESTING');
   const complete     = tickets.filter(t => t.status === 'DONE' || t.status === 'COMPLETE');
   // Anything else → in-progress
-  const unknown      = tickets.filter(t => !['NOT_STARTED','IN_PROGRESS','NEEDS_SETUP','NEEDS_TESTING','NEEDS_USER_TESTING','DONE','COMPLETE'].includes(t.status));
+  const unknown      = tickets.filter(t => !['NOT_STARTED','IN_PROGRESS','NEEDS_SETUP','NEEDS_TESTING','NEEDS_USER_TESTING','PR_OPEN','DONE','COMPLETE'].includes(t.status));
 
   const allInProgress = [...inProgress, ...unknown];
 
@@ -436,10 +486,11 @@ header h1{font-size:19px;font-weight:700;color:#f1f5f9}
   <div class="hdr-links">
     <a class="prd-link" href="/graph">Dependency graph</a>
     <a class="prd-link" href="/prd">Feature list</a>
-    <a class="prd-link" href="/checklist">Checklist</a>
+    <a class="prd-link" href="/user-tests">UX tests</a>
     <button class="refresh" onclick="location.reload()">↺ Refresh</button>
   </div>
 </header>
+${renderPreflight()}
 <div class="board">
   ${unstartedCol}
   ${inProgressCol}
@@ -499,7 +550,7 @@ async function submitFeedback(issue) {
   }
 }
 </script>
-</body>
+<script>async function resolveSetup(issue){if(!confirm('Confirm the requested external setup is complete?'))return;const r=await fetch('/setup-resolved',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issue})});const j=await r.json();alert(j.message||j.error||'Updated');}</script></body>
 </html>`;
 }
 
@@ -669,7 +720,6 @@ a.back:hover{background:#1e2433;color:#93c5fd}
 <body>
 <header>
   <a class="back" href="/">← Board</a>
-  <a class="back" href="/checklist">Checklist</a>
   <div>
     <div class="hdr-title">${esc(title)}</div>
     <div class="hdr-sub">${features.length} feature${features.length !== 1 ? 's' : ''}</div>
@@ -688,7 +738,7 @@ a.back:hover{background:#1e2433;color:#93c5fd}
 // ── Dependency graph page ──────────────────────────────────────────────────────
 const STATUS_COLOR = {
   NOT_STARTED: '#475569', IN_PROGRESS: '#2563eb', NEEDS_SETUP: '#dc2626',
-  RUNNING_TESTS: '#7c3aed', NEEDS_USER_TESTING: '#d97706', DONE: '#059669', COMPLETE: '#059669',
+  RUNNING_TESTS: '#7c3aed', NEEDS_USER_TESTING: '#d97706', PR_OPEN: '#2563eb', DONE: '#059669', COMPLETE: '#059669',
 };
 
 function renderGraphPage() {
@@ -727,10 +777,10 @@ svg.edges{position:absolute;top:0;left:0;pointer-events:none;overflow:visible}
 #tip .snip{margin-top:7px;font-size:12px;color:#cbd5e1;line-height:1.5;border-top:1px solid #1e2433;padding-top:7px}
 .wavehdr{position:absolute;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#475569}
 .msg{padding:40px 28px;color:#64748b}</style></head><body>
-<header><a class="back" href="/">← Board</a><a class="back" href="/checklist">Checklist</a><div><div class="h1">Dependency graph</div><div class="sub">${esc(projectName)} — hover a ticket for its state, click to open it</div></div></header>
+<header><a class="back" href="/">← Board</a><div><div class="h1">Dependency graph</div><div class="sub">${esc(projectName)} — hover a ticket for its state, click to open it</div></div></header>
 ${body}<div id="tip"></div></body></html>`;
 
-  if (!fs.existsSync(gp)) return shell(`<div class="msg">No <code>kanban/graph.json</code> yet. Create tickets (kanban-create) or run <code>kanban-graph</code>.</div>`);
+  if (!fs.existsSync(gp)) return shell(`<div class="msg">No roadmap state yet. Run <code>bin/roadmap-sync --sync-kanban</code>.</div>`);
   let graph; try { graph = JSON.parse(fs.readFileSync(gp, 'utf8')); } catch(e) { return shell(`<div class="msg">graph.json unreadable.</div>`); }
   const nodes = graph.nodes || [];
   if (!nodes.length) return shell(`<div class="msg">Graph has no tickets yet.</div>`);
@@ -831,18 +881,15 @@ function testFeature(id,cmd){ location.href='/test/'+encodeURIComponent(id); }
 
 // ── Single ticket page ─────────────────────────────────────────────────────────
 
-// Map a knowledge-doc path (optionally with #anchor) to an in-app href.
-// knowledge/prd/product.md#<feature> → the PRD page anchor; everything else → the /file viewer.
+// Map a project-document path, optionally with an anchor, to the safe file viewer.
 function sourceHref(p) {
-  const prd = p.match(/^knowledge\/prd\/product\.md#(.+)$/);
-  if (prd) return `/prd#${encodeURIComponent(prd[1])}`;
   const [file, anchor] = p.split('#');
   return `/file?path=${encodeURIComponent(file)}` + (anchor ? `#${encodeURIComponent(anchor)}` : '');
 }
 
-// Turn knowledge/... and kanban/... paths inside already-escaped text into viewer links.
+// Turn current docs paths inside already-escaped text into viewer links.
 function linkifyPaths(escaped) {
-  return escaped.replace(/(knowledge\/[^\s,)]+|kanban\/[^\s,)]+)/g,
+  return escaped.replace(/(docs\/(?:product|architecture|delivery)\/[^\s,)]+)/g,
     m0 => `<a class="ref" href="${sourceHref(m0)}">${m0}</a>`);
 }
 
@@ -939,7 +986,7 @@ pre{padding:11px 13px;overflow-x:auto;margin:8px 0}code{padding:2px 5px}
   // one-click Test button that sets up its environment via /launch.
   const nut = (fm.needs_user_test || 'true').trim() !== 'false';
   const status = (fm.status || '').trim();
-  const testable = nut && (status === 'NEEDS_USER_TESTING' || status === 'NEEDS_TESTING');
+  const testable = nut && status === 'NEEDS_USER_TESTING';
   const testBar = testable
     ? `<div style="margin:0 0 18px"><a href="/test/${esc(id)}" style="display:inline-block;font-size:13px;font-weight:700;background:#0369a1;color:#fff;border-radius:6px;padding:9px 16px;text-decoration:none">▶ Test this feature</a>
        <span style="font-size:11px;color:#64748b;margin-left:10px">validated — only your taste remains</span></div>`
@@ -979,13 +1026,14 @@ async function verdictReport(issue){
   if(await postVerdict({issue,text}))document.getElementById('vd-text').disabled=true;
 }
 </script>` : '';
+  const featureDoc = fm.feature_doc || `docs/product/features/${fm.feature}.md`;
   const featLink = fm.feature
-    ? `<div style="margin:0 0 16px"><a class="back" href="/prd#${esc(fm.feature)}" style="color:#7dd3fc">📄 ${esc(fm.feature)} — feature PRD (why/goal/user flow) ↗</a></div>`
+    ? `<div style="margin:0 0 16px"><a class="back" href="/file?path=${encodeURIComponent(featureDoc)}" style="color:#7dd3fc">📄 ${esc(fm.feature)} — product source of truth ↗</a></div>`
     : '';
   return shell(`${featLink}${sourcesHtml}<div class="fm">${fmHtml}</div>${testBar}${feedbackBar}${out}`);
 }
 
-// ── Knowledge-doc viewer: /file?path=knowledge/... (read-only, inside PROJECT_ROOT) ──
+// ── Current project-document viewer (read-only, inside docs/) ──
 function renderFilePage(rel) {
   const projectName = path.basename(PROJECT_ROOT);
   const shell = (body, title) => `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
@@ -1009,8 +1057,9 @@ pre{padding:11px 13px;overflow-x:auto;margin:8px 0}code{padding:2px 5px}
   if (!rel || !rel.endsWith('.md'))
     return { status: 400, html: shell(`<p class="err">path must be a .md file.</p>`, 'file') };
   const abs = path.resolve(PROJECT_ROOT, rel);
-  if (abs !== PROJECT_ROOT && !abs.startsWith(PROJECT_ROOT + path.sep))
-    return { status: 403, html: shell(`<p class="err">Path escapes the project root.</p>`, 'file') };
+  const docsRoot = path.join(PROJECT_ROOT, 'docs');
+  if (!abs.startsWith(docsRoot + path.sep))
+    return { status: 403, html: shell(`<p class="err">Only project documentation may be viewed.</p>`, 'file') };
   if (!fs.existsSync(abs) || !fs.statSync(abs).isFile())
     return { status: 404, html: shell(`<p class="err">No file at <code>${esc(rel)}</code>.</p>`, 'file') };
   const raw = fs.readFileSync(abs, 'utf8');
@@ -1077,7 +1126,7 @@ ${body}</body></html>`;
   }).length;
   const pct = Math.round((shippedCount / features.length) * 100);
 
-  const STATUS_ORDER = ['NOT_STARTED','IN_PROGRESS','NEEDS_SETUP','RUNNING_TESTS','NEEDS_TESTING','NEEDS_USER_TESTING','DONE'];
+  const STATUS_ORDER = ['NOT_STARTED','IN_PROGRESS','NEEDS_SETUP','RUNNING_TESTS','NEEDS_TESTING','NEEDS_USER_TESTING','PR_OPEN','DONE'];
   const counts = {};
   for (const t of tickets) {
     const s = isDone(t) ? 'DONE' : t.status;
@@ -1150,10 +1199,13 @@ a.back:hover{background:#1e2433;color:#93c5fd}
   const fm = parseFrontmatter(fs.readFileSync(fp, 'utf8'));
 
   let why = '', goal = '';
-  const productPath = path.join(KNOWLEDGE_DIR, 'prd', 'product.md');
-  if (fm.feature && fs.existsSync(productPath)) {
-    const feat = parseProductPrd(fs.readFileSync(productPath, 'utf8'), {}).find(f => f.name === fm.feature);
-    if (feat) { why = feat.why; goal = feat.goal; }
+  const featurePath = path.join(PROJECT_ROOT, fm.feature_doc || `docs/product/features/${safeId}.md`);
+  let positive = '', negative = '', subjective = '';
+  if (fs.existsSync(featurePath)) {
+    const feature = fs.readFileSync(featurePath, 'utf8');
+    why = parseSection(feature, 'Purpose'); goal = parseSection(feature, 'User outcome');
+    positive = parseSection(feature, 'Positive flow'); negative = parseSection(feature, 'Negative and recovery flow');
+    subjective = parseSection(feature, 'Subjective user-test questions');
   }
 
   const featureCtx = (why || goal) ? `<div class="card">
@@ -1161,10 +1213,15 @@ a.back:hover{background:#1e2433;color:#93c5fd}
       ${why ? `<p class="txt"><strong>Why it exists:</strong> ${esc(why)}</p>` : ''}
       ${goal ? `<p class="txt" style="margin-top:6px"><strong>Goal:</strong> ${esc(goal)}</p>` : ''}
     </div>` : '';
+  const flowCtx = `<div class="card"><div class="lbl">What to try</div>
+    <p class="txt"><strong>Expected flow:</strong> ${esc(positive || 'Follow the primary user flow.')}</p>
+    <p class="txt" style="margin-top:6px"><strong>Recovery flow:</strong> ${esc(negative || 'Try one reasonable invalid or interrupted path.')}</p>
+    ${subjective ? `<p class="txt" style="margin-top:6px"><strong>Your judgment:</strong> ${esc(subjective)}</p>` : ''}</div>`;
 
   return shell(`
   <div class="hd">You're about to test: ${esc(fm.title || safeId)}</div>
   ${featureCtx}
+  ${flowCtx}
   <div class="reassure">The automated validator has already checked that this works — correctness, edge cases, and error handling are covered. You are judging one thing: how it FEELS to use. Trust your gut.</div>
   <div class="actions">
     <button class="start" id="start-btn" onclick="startTest()">▶ Start test</button>
@@ -1191,6 +1248,18 @@ a.back:hover{background:#1e2433;color:#93c5fd}
   </script>`);
 }
 
+function renderUserTestsPage() {
+  const ready = readTickets().filter(t => t.status === 'NEEDS_USER_TESTING' && t.needs_user_test);
+  const cards = ready.map(t => `<article style="background:#161b27;border:1px solid #1e2433;border-radius:8px;padding:18px">
+    <h2 style="font-size:16px;margin:0 0 8px">${esc(t.title || t.issue)}</h2>
+    <p style="color:#94a3b8">Feature: ${esc(t.feature || t.issue)}</p>
+    <a href="/test/${esc(t.issue)}" style="display:inline-block;margin-top:10px;background:#0369a1;color:white;padding:8px 14px;border-radius:6px;text-decoration:none;font-weight:700">Test Me</a>
+  </article>`).join('');
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>UX tests</title>${LIVE_SCRIPT}</head>
+  <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#e2e8f0;margin:0"><header style="padding:16px 28px;border-bottom:1px solid #1e2433"><a href="/" style="color:#7dd3fc;text-decoration:none">← Board</a></header>
+  <main style="max-width:850px;margin:auto;padding:28px"><h1 style="font-size:20px">Features ready for your UX test</h1><p style="color:#94a3b8">Objective tests already passed. Select a feature to judge clarity, effort, flow, and feel.</p><section style="display:grid;gap:12px;margin-top:20px">${cards || '<p style="color:#64748b">No feature currently needs a user UX test.</p>'}</section></main></body></html>`;
+}
+
 const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/') {
     const tickets = readTickets();
@@ -1202,6 +1271,12 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/graph') {
     res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
     res.end(renderGraphPage());
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/user-tests') {
+    res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
+    res.end(renderUserTestsPage());
     return;
   }
 
@@ -1245,14 +1320,9 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === 'GET' && req.url === '/prd') {
+    const current = renderFilePage('docs/product/PRD.md');
     res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
-    res.end(renderPrdPage());
-    return;
-  }
-
-  if (req.method === 'GET' && req.url === '/checklist') {
-    res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
-    res.end(renderChecklistPage());
+    res.end(current.html);
     return;
   }
 
@@ -1321,10 +1391,13 @@ const server = http.createServer((req, res) => {
           return;
         }
 
-        const command = b.command || b.test_command || fm.test_command || '';
-        if (!command || typeof command !== 'string') {
+        const planned = readRoadmap().find(f => f.id === issue) || {};
+        const test = planned.test || {};
+        const launcher = typeof test.launcher === 'string' ? test.launcher : '';
+        const launcherArgs = Array.isArray(test.args) && test.args.every(x => typeof x === 'string') ? test.args : [];
+        if (!launcher) {
           res.writeHead(200, {'Content-Type': 'application/json'});
-          res.end(JSON.stringify({ok: false, message: `No test_command on ${issue || 'request'} — the builder has not set one`}));
+          res.end(JSON.stringify({ok: false, message: `No reviewed test launcher is declared for ${issue}`}));
           return;
         }
 
@@ -1334,6 +1407,10 @@ const server = http.createServer((req, res) => {
         let cwd = PROJECT_ROOT;
         if (worktree && fs.existsSync(worktree)) cwd = worktree;
         else if (repo && fs.existsSync(repo)) cwd = repo;
+        if (!fm.candidate_commit || execFileSync('git', ['-C', cwd, 'rev-parse', 'HEAD'], {encoding:'utf8'}).trim() !== fm.candidate_commit) {
+          res.writeHead(200, {'Content-Type':'application/json'});
+          res.end(JSON.stringify({ok:false,message:'The test worktree is not the independently validated candidate.'})); return;
+        }
 
         let port = parseInt(fm.port);
         if (isNaN(port)) { port = pickFreshPort(); if (issue) registerTestPort(issue, port); }
@@ -1347,15 +1424,36 @@ const server = http.createServer((req, res) => {
           }
         }
 
-        const child = spawn('bash', ['-c', command], {detached: true, stdio: 'ignore', cwd, env});
-        child.unref();
+        const launcherPath = abs(launcher);
+        if (!launcherPath.startsWith(PROJECT_ROOT + path.sep) || !fs.existsSync(launcherPath)) {
+          res.writeHead(200, {'Content-Type':'application/json'});
+          res.end(JSON.stringify({ok:false,message:'The reviewed test launcher is missing or outside this project.'}));
+          return;
+        }
+        const runtimeDir = path.join(PROJECT_ROOT, '.factory', 'runtime', 'environments');
+        fs.mkdirSync(runtimeDir, {recursive:true});
+        const logPath = path.join(runtimeDir, `${issue}.log`);
+        const logFd = fs.openSync(logPath, 'a');
+        const child = spawn(launcherPath, launcherArgs, {detached:true, stdio:['ignore',logFd,logFd], cwd, env});
+        child.unref(); fs.closeSync(logFd);
 
-        const lu = (fm.landing_url || '').trim();
+        const lu = String(test.landing_path || fm.landing_url || '').trim();
         const url = lu
           ? (lu.startsWith('http') ? lu : `http://localhost:${port}${lu.startsWith('/') ? lu : '/' + lu}`)
           : `http://localhost:${port}`;
-        res.writeHead(200, {'Content-Type': 'application/json'});
-        res.end(JSON.stringify({ok: true, port, url}));
+        const hp = String(test.health_path || '').trim();
+        const healthUrl = hp ? `http://127.0.0.1:${port}${hp.startsWith('/') ? hp : '/' + hp}` : url;
+        const statePath = path.join(runtimeDir, `${issue}.json`);
+        const writeState = status => fs.writeFileSync(statePath, JSON.stringify({issue,port,pid:child.pid,url,health_url:healthUrl,candidate_commit:fm.candidate_commit||'',status}, null, 2));
+        writeState('starting');
+        const deadline = Date.now() + Math.max(1, Number(test.timeout_seconds || 60)) * 1000;
+        const failLaunch = () => { try{process.kill(-child.pid,'SIGTERM')}catch{}; writeState('failed'); res.writeHead(200, {'Content-Type':'application/json'}); res.end(JSON.stringify({ok:false,message:`Test environment did not become healthy. Logs: ${path.relative(PROJECT_ROOT,logPath)}`})); };
+        const check = () => http.get(healthUrl, hr => {
+          hr.resume();
+          if (hr.statusCode >= 200 && hr.statusCode < 500) { writeState('ready'); res.writeHead(200, {'Content-Type':'application/json'}); res.end(JSON.stringify({ok:true,port,url})); }
+          else if (Date.now() < deadline) setTimeout(check, 500); else failLaunch();
+        }).on('error', () => { if (Date.now() < deadline) setTimeout(check, 500); else failLaunch(); });
+        check();
       } catch(e) {
         try {
           res.writeHead(200, {'Content-Type': 'application/json'});
@@ -1387,15 +1485,15 @@ const server = http.createServer((req, res) => {
         });
 
         if (approve) {
-          // "All clear" → integrate the ticket: kanban-done <issue> "<feedback>"
-          const child = spawn('bash', ['-c', 'kanban-done "$ISSUE" "$FBTEXT"'], {
+          // "All clear" → push the tested candidate and open its GitHub pull request.
+          const child = spawn(path.join(PROJECT_ROOT, 'bin', 'kanban-done'), [issue, text || 'approved'], {
             detached: true, stdio: 'ignore',
             cwd: PROJECT_ROOT,
-            env: Object.assign({}, cmdEnv, {ISSUE: issue, FBTEXT: text || 'approved'}),
+            env: cmdEnv,
           });
           child.unref();
           res.writeHead(200, {'Content-Type': 'application/json'});
-          res.end(JSON.stringify({ok: true, message: `Approved — integrating ${issue} (kanban-done dispatched).`}));
+          res.end(JSON.stringify({ok: true, message: `Approved — opening the GitHub pull request for ${issue}.`}));
           return;
         }
 
@@ -1416,12 +1514,12 @@ const server = http.createServer((req, res) => {
         }
         fs.writeFileSync(kf, content);
 
-        // …and route it to the coordinator/PM session.
+        // Route product feedback through the project-local event bus.
         try {
-          const child = spawn('bash', ['-c', 'tmux-delegate "$(cat ~/.claude/.coordinator)" "USER-FEEDBACK ${ISSUE}: ${FBTEXT}"'], {
+          const child = spawn(path.join(PROJECT_ROOT, 'bin', 'factory-notify'), ['product-manager', `USER-FEEDBACK ${issue}: ${text}`], {
             detached: true, stdio: 'ignore',
             cwd: PROJECT_ROOT,
-            env: Object.assign({}, cmdEnv, {ISSUE: issue, FBTEXT: text}),
+            env: cmdEnv,
           });
           child.unref();
         } catch (e) { /* feedback is saved on the ticket even if delegation fails */ }
@@ -1434,6 +1532,17 @@ const server = http.createServer((req, res) => {
       }
     });
     return;
+  }
+
+  if (req.method === 'POST' && req.url === '/setup-resolved') {
+    let body = ''; req.on('data', d => body += d); req.on('end', () => {
+      try {
+        const issue = String(JSON.parse(body || '{}').issue || '').replace(/[^a-zA-Z0-9_-]/g, '');
+        if (!issue || !fs.existsSync(path.join(KANBAN_DIR, `${issue}.md`))) throw new Error('Unknown ticket');
+        const child = spawn(path.join(PROJECT_ROOT, 'bin', 'kanban-resolved'), [issue, 'User confirmed external setup through project UI'], {detached:true,stdio:'ignore',cwd:PROJECT_ROOT,env:{...process.env,KANBAN_PROJECT_ROOT:PROJECT_ROOT}});
+        child.unref(); res.writeHead(200, {'Content-Type':'application/json'}); res.end(JSON.stringify({ok:true,message:`Setup confirmation sent for ${issue}.`}));
+      } catch(e) { res.writeHead(400, {'Content-Type':'application/json'}); res.end(JSON.stringify({ok:false,error:e.message})); }
+    }); return;
   }
 
   res.writeHead(404);

@@ -6,14 +6,15 @@
 #   NOT_STARTED         — ticket exists; waiting for its dependencies to finish
 #   IN_PROGRESS         — the builder is building + self-testing (its own session, persists per ticket)
 #   NEEDS_SETUP         — blocked on something only a human holds (a login/account/key); remarks say what
-#   RUNNING_TESTS       — builder is done; on this transition the KANBAN spawns/messages the ticket's
+#   READY_FOR_TESTING   — builder signal; the kanban rebases, reruns tests, then translates it
+#   RUNNING_TESTS       — pre-test rebase passed; the KANBAN spawns/messages the ticket's
 #                         persistent validator, which tests the REAL running system
 #   NEEDS_USER_TESTING  — validation passed and the ticket needs a human's taste; the board Test button
 #                         is live. Reached only when needs_user_test=true.
 #   DONE                — integrated onto main (use kanban-done; auto for needs_user_test=false)
 #
 # Verbs an agent may pass as <status>:
-#   builder    → IN_PROGRESS | NEEDS_SETUP | RUNNING_TESTS
+#   builder    → IN_PROGRESS | NEEDS_SETUP | READY_FOR_TESTING
 #   validator  → VALIDATED  (pass; the kanban routes to NEEDS_USER_TESTING or integrates to DONE)
 #                on FAIL the validator queues VALIDATION-FAILED to the builder instead (no status verb)
 set -e
@@ -37,6 +38,13 @@ fi
 
 PREV_STATUS=$(grep "^status:" "$KANBAN_FILE" | awk '{print $2}')
 
+# Builder readiness is a signal, not a stored testing state. The program owns the handoff:
+# rebase onto current main, rerun the builder's test command, record exact SHAs, then call us back
+# with RUNNING_TESTS. The independent tester is never awakened against a pre-rebase candidate.
+if [ "$STATUS" = "READY_FOR_TESTING" ]; then
+  exec "$PROJECT_ROOT/bin/prepare-for-test" "$ISSUE"
+fi
+
 # RUNNING_TESTS gate (builder → validation). The builder has finished building + self-testing.
 # Gate what must be true before an independent validator can test the REAL artifact, then let the
 # post-transition block spawn the validator (the kanban reacts; the builder does not spawn it).
@@ -53,15 +61,38 @@ if [ "$STATUS" = "RUNNING_TESTS" ]; then
     echo "[$ISSUE] REFUSED RUNNING_TESTS: uncommitted/untracked changes in worktree $WT. Commit on feat/$ISSUE first."
     exit 1
   fi
+  grep -qE '^audited_base: [0-9a-f]{40}$' "$KANBAN_FILE" || {
+    echo "[$ISSUE] REFUSED RUNNING_TESTS: pre-test rebase did not record audited_base"; exit 1;
+  }
+  grep -qE '^candidate_commit: [0-9a-f]{40}$' "$KANBAN_FILE" || {
+    echo "[$ISSUE] REFUSED RUNNING_TESTS: pre-test rebase did not record candidate_commit"; exit 1;
+  }
 fi
 
 # VALIDATED (validator → route). Not a stored state — a signal the validator sends on a passing
 # verdict. The kanban translates it: a user-test ticket parks at NEEDS_USER_TESTING for the human;
 # a non-user-test ticket has nothing to judge, so it integrates straight to DONE.
 if [ "$STATUS" = "VALIDATED" ]; then
+  # Require criterion evidence and the independent multi-axis test report.
+  AFILE="$PROJECT_ROOT/kanban/audit/$ISSUE.md"
+  CFILE="$PROJECT_ROOT/kanban/audit/$ISSUE-criteria.md"
   VFILE="$PROJECT_ROOT/kanban/validation/$ISSUE.md"
-  if ! grep -qE '^verdict: pass' "$VFILE" 2>/dev/null; then
-    echo "[$ISSUE] REFUSED VALIDATED: no passing validation verdict at $VFILE."
+  if ! grep -qE '^verdict: pass' "$CFILE" 2>/dev/null; then
+    echo "[$ISSUE] REFUSED VALIDATED: criterion-level audit is absent or not a pass: $CFILE"
+    exit 1
+  fi
+  if [ -f "$AFILE" ]; then
+    if grep -qE '^verdict: external' "$AFILE" 2>/dev/null; then
+      echo "[$ISSUE] REFUSED VALIDATED: audit verdict is 'external' — an external (human-held) blocker."
+      echo "Set NEEDS_SETUP with the exact need instead. See $AFILE."
+      exit 1
+    fi
+    if ! grep -qE '^verdict: pass' "$AFILE" 2>/dev/null; then
+      echo "[$ISSUE] REFUSED VALIDATED: audit matrix at $AFILE is not a pass. Run: kanban-audit $ISSUE show"
+      exit 1
+    fi
+  elif ! grep -qE '^verdict: pass' "$VFILE" 2>/dev/null; then
+    echo "[$ISSUE] REFUSED VALIDATED: no passing audit matrix ($AFILE) or validation verdict ($VFILE)."
     exit 1
   fi
   NUT=$(grep -m1 '^needs_user_test:' "$KANBAN_FILE" | awk '{print $2}'); [ -z "$NUT" ] && NUT=true
@@ -92,8 +123,11 @@ printf '{"ts":%s,"issue":"%s","from":"%s","to":"%s","notes":%s}\n' \
 echo "[$ISSUE] $STATUS${NOTES:+ — $NOTES}"
 
 KANBAN_PROJECT_ROOT="$PROJECT_ROOT" factory-log task_update issue="$ISSUE" status="$STATUS" from="${PREV_STATUS:-NONE}"
+if [ "$STATUS" = "NEEDS_SETUP" ]; then
+  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$PROJECT_ROOT/bin/setup-request" "$ISSUE" "${NOTES:-external setup required}" >/dev/null
+fi
 # Keep the materialized graph's node statuses current.
-KANBAN_PROJECT_ROOT="$PROJECT_ROOT" kanban-graph --emit 2>/dev/null || true
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$PROJECT_ROOT/bin/roadmap-sync" --root "$PROJECT_ROOT" --sync-kanban >/dev/null 2>&1 || true
 
 # On RUNNING_TESTS the KANBAN spawns (first round) or messages (later rounds) the ticket's own
 # persistent validator session — the builder never does. spawn-validator allocates the test port
@@ -108,7 +142,7 @@ fi
 # human's Test step is ready. No card is generated — the board's Test button is the setup surface.
 if [ "$STATUS" = "NEEDS_USER_TESTING" ]; then
   PORT=$(KANBAN_PROJECT_ROOT="$PROJECT_ROOT" kanban-port "$ISSUE")
-  COORDINATOR=$(cat ~/.claude/.coordinator 2>/dev/null)
-  [ -n "$COORDINATOR" ] && KANBAN_PROJECT_ROOT="$PROJECT_ROOT" tmux-delegate "$COORDINATOR" \
-    "[$ISSUE] ready for user test (port $PORT) — open the board and press Test."
+  BRIEF=$(KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$PROJECT_ROOT/bin/user-test-brief" "$ISSUE")
+  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$PROJECT_ROOT/bin/factory-notify" coordinator \
+    "[$ISSUE] objective tests passed; subjective UX review is ready at $BRIEF (port $PORT)."
 fi

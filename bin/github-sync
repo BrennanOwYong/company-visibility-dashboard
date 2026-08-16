@@ -1,0 +1,32 @@
+#!/bin/bash
+# Observe GitHub pull requests. After GitHub merges, fast-forward local main and dispatch ready work.
+set -euo pipefail
+ROOT=${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+changed=0
+for TICKET in "$ROOT"/kanban/*.md; do
+  [ -f "$TICKET" ] || continue
+  grep -q '^status: PR_OPEN$' "$TICKET" || continue
+  ISSUE=$(basename "$TICKET" .md)
+  PR_URL=$(grep -m1 '^pr_url:' "$TICKET" | sed 's/^pr_url:[[:space:]]*//')
+  [ -n "$PR_URL" ] || continue
+  DATA=$(gh pr view "$PR_URL" --json state,mergedAt,mergeCommit 2>/dev/null || true)
+  STATE=$(printf '%s' "$DATA" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("state",""))' 2>/dev/null || true)
+  [ "$STATE" = "MERGED" ] || continue
+  MERGED=$(printf '%s' "$DATA" | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("mergeCommit") or {}).get("oid",""))')
+  git -C "$ROOT" fetch origin main
+  [ "$(git -C "$ROOT" symbolic-ref --short HEAD)" = main ] || { echo "[$ISSUE] local checkout is not main"; continue; }
+  git -C "$ROOT" merge --ff-only origin/main
+  sed -i "s/^status: .*/status: DONE/" "$TICKET"
+  if grep -q '^merged_commit:' "$TICKET"; then sed -i "s/^merged_commit:.*/merged_commit: $MERGED/" "$TICKET"; fi
+  KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-log" pull_request_merged issue="$ISSUE" commit="$MERGED" || true
+  if ! "$ROOT/bin/aar-check" "$ISSUE" "$ROOT" >/dev/null 2>&1; then
+    KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-log" optimization_debt issue="$ISSUE" reason=missing_or_incomplete_aar || true
+    KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-notify" "$ISSUE" \
+      "[$ISSUE] GitHub merged the feature. Testing and dispatch continue. Add the advisory AAR with repeated module-specific steps, skill candidates, and trip-ups if the session still has useful context." || true
+  fi
+  changed=1
+done
+if [ "$changed" -eq 1 ]; then
+  KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/roadmap-sync" --root "$ROOT" --sync-kanban >/dev/null
+  KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/kanban-dispatch" || true
+fi

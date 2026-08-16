@@ -1,0 +1,71 @@
+#!/bin/bash
+# Generate the subjective-UX briefing and fast-forward instructions after objective tests pass.
+set -euo pipefail
+ISSUE=${1:-}
+ROOT=${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+TICKET="$ROOT/kanban/$ISSUE.md"
+[ -f "$TICKET" ] || { echo "Usage: user-test-brief <issue>"; exit 1; }
+fm() { grep -m1 "^$1:" "$TICKET" | sed "s/^$1:[[:space:]]*//"; }
+[ "$(fm needs_user_test)" = "true" ] || { echo "[$ISSUE] has no subjective UX gate"; exit 1; }
+FEATURE=$(fm feature); TITLE=$(fm title); COMMAND=$(fm test_command); PORT=$(fm port)
+FEATURE_DOC=$(fm feature_doc); FEATURE_DOC=${FEATURE_DOC:-docs/product/features/$FEATURE.md}
+[ -f "$ROOT/$FEATURE_DOC" ] || { echo "[$ISSUE] missing feature document: $FEATURE_DOC"; exit 1; }
+OUT="$ROOT/kanban/user-test-cards/$ISSUE-brief.md"
+mkdir -p "$(dirname "$OUT")"
+cat > "$OUT" <<EOF
+---
+issue: $ISSUE
+feature: $FEATURE
+port: $PORT
+---
+
+# UX review: $TITLE
+
+## Ticket and parent feature
+
+- Ticket: $ISSUE
+- Current-PRD feature: $FEATURE
+- Agreed feature document: $FEATURE_DOC
+
+## What was agreed in the product conversation
+
+The following text is quoted from the current feature document. It is the maintained record of the
+product conversation.
+
+EOF
+python3 - "$ROOT/$FEATURE_DOC" >> "$OUT" <<'PY'
+import re,sys
+text=open(sys.argv[1],encoding="utf-8").read()
+for heading in ("Purpose","User outcome","Positive flow","Negative and recovery flow","Subjective user-test questions"):
+    match=re.search(rf"^## {re.escape(heading)}\s*$\n(.*?)(?=^## |\Z)",text,re.M|re.S)
+    if match:
+        print(f"### {heading}\n\n> " + match.group(1).strip().replace("\n","\n> ") + "\n")
+PY
+cat >> "$OUT" <<EOF
+
+## Already verified by agents
+
+All functional done criteria, positive and negative flows, failure behavior, contracts, and required
+event chains passed independent testing. Do not retest functional correctness here.
+
+## What the user judges
+
+- Clarity and visual hierarchy
+- Flow and perceived effort
+- Wording and first-use comprehension
+- Visual coherence and perceived speed
+
+## Environment preparation and fast-forward
+
+Run: `$COMMAND`
+
+The test-state command must seed prerequisites, authenticate a test identity when possible, start
+required services, and stop at the interaction that needs subjective review. Allocated port: $PORT.
+
+## Feedback routing
+
+The PRD agent classifies feedback. A small presentation change returns to the same builder and then
+reruns affected objective tests. A changed product outcome supersedes this ticket and returns through
+PRD and technical planning.
+EOF
+echo "$OUT"

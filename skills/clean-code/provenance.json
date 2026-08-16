@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "work": "Clean Code: A Handbook of Agile Software Craftsmanship",
+  "author": "Robert C. Martin",
+  "generated_at": "2026-08-14",
+  "verification_status": "unverified",
+  "source_sha256": null,
+  "edition": null,
+  "isbn": null,
+  "converter": null,
+  "converter_version": null,
+  "converter_command": null,
+  "coverage": {
+    "chapters_summarized": 17,
+    "appendices_omitted": ["A", "B", "C"],
+    "page_mapping_available": false
+  },
+  "required_before_verified": [
+    "identify the legally available source edition and checksum",
+    "record book-to-skill version and options",
+    "map generated sections to chapter/page ranges",
+    "audit omissions and a representative sample for distortion",
+    "record pruning decisions for contextual, obvious, or overly absolute advice"
+  ]
+}

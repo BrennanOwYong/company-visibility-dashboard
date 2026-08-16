@@ -1,0 +1,15 @@
+#!/bin/bash
+# Whole-project pull-request check used locally and by GitHub Actions.
+set -euo pipefail
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+for file in "$ROOT"/bin/*; do
+  [ -f "$file" ] || continue
+  case "$(head -1 "$file")" in *bash*) bash -n "$file";; esac
+done
+python3 -m py_compile "$ROOT/bin/aar-check" "$ROOT/bin/criterion-audit" "$ROOT/bin/roadmap-sync"
+node --check "$ROOT/kanban-ui/server.js"
+KANBAN_PROJECT_ROOT="$ROOT/tests/fixtures/factory-project" "$ROOT/bin/roadmap-sync" --root "$ROOT/tests/fixtures/factory-project" >/dev/null
+"$ROOT/tests/test-browser-evidence.sh"
+"$ROOT/tests/test-ui-user-tests.sh"
+"$ROOT/tests/test-github-pr-flow.sh"
+echo 'factory project checks: PASS'

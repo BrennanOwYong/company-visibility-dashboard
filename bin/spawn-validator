@@ -12,7 +12,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ISSUE="$1"
-PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(cat "$HOME/.claude/.coordinator-root" 2>/dev/null || pwd)}"
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 KANBAN_FILE="$PROJECT_ROOT/kanban/$ISSUE.md"
 
 if [ -z "$ISSUE" ]; then
@@ -32,28 +32,23 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
   tmux new-session -d -s "$SESSION" -c "$PROJECT_ROOT" \
     -e "PATH=$PROJECT_ROOT/bin:$PATH" \
     -e "KANBAN_PROJECT_ROOT=$PROJECT_ROOT" \
-    -e "FACTORY_AGENT=validator-agent" \
+    -e "FACTORY_AGENT=$SESSION" \
     -e "VALIDATOR_ISSUE=$ISSUE" \
-    -e "CLAUDE_CODE_SUBAGENT_MODEL=${FACTORY_SUBAGENT_MODEL:-sonnet}"
-  tmux send-keys -t "$SESSION" "${CLAUDE_BIN:-claude} --dangerously-skip-permissions --model ${VALIDATOR_MODEL:-sonnet} --agent validator-agent" Enter
+    -e "FACTORY_PROJECT_ROOT=$PROJECT_ROOT" \
+    -e "FACTORY_ROLE=tester" \
+    -e "FACTORY_TICKET=$ISSUE"
+  tmux send-keys -t "=$SESSION" "codex --dangerously-bypass-approvals-and-sandbox -m ${VALIDATOR_MODEL:-gpt-5.6-terra}" Enter
   # The idle mark is the delivery gate — wait for the TUI to be input-ready before marking idle.
   BOOT_DEADLINE=$(( $(date +%s) + ${AGENT_BOOT_SECONDS:-90} ))
-  if [ "${CLAUDE_BIN:-claude}" = "claude" ]; then
-    until tmux capture-pane -pJ -t "$SESSION" -S -30 2>/dev/null | grep -qE "bypass permissions|shift\+tab|esc to interrupt"; do
-      sleep 2
-      [ "$(date +%s)" -ge "$BOOT_DEADLINE" ] && { echo "[spawn-validator] WARNING: $SESSION TUI not ready after ${AGENT_BOOT_SECONDS:-90}s; marking idle anyway"; break; }
-    done
-  else
-    sleep 1
-  fi
+  sleep 1
   KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/agent-state" "$SESSION" idle
   KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/factory-log" agent_spawned agent="$SESSION" 2>/dev/null || true
 fi
 
 if [ "$EXISTED" = "0" ]; then
-  MSG="VALIDATE: $ISSUE — read the ticket kanban/$ISSUE.md frontmatter: its success_criteria and testing fields are LINK paths to the contract docs (typically knowledge/contracts/acceptance/$FEATURE.md); read those docs — they are your contract source. Author your OWN tests from the contract. Honor the ticket's target_type field for HOW you test: web/service = bring the app up via test_command and drive it on port $PORT; extension = build it, load the unpacked extension in Chrome via agent-browser, and drive it there (no HTTP port app); cli/library = run test_command and exercise the binary/API directly. test_command brings up whatever the target needs. Write kanban/validation/$ISSUE.md with per-assertion verdicts, each tracing to a contract line. On PASS: run 'kanban-update $ISSUE VALIDATED'. On any builder-defect FAIL: queue the numbered defects to the builder with 'tmux-delegate $ISSUE \"VALIDATION-FAILED: <defects with evidence>. Fix and re-request.\"' and do NOT set a status. Round cap and classification per your agent rules."
+  MSG="VALIDATE: $ISSUE as factory_tester. The candidate was programmatically rebased and builder-tested before this message. Read kanban/$ISSUE.md only for runtime state and follow feature_doc and architecture_doc to the immutable product outcomes and technical implementation. Read relevant contracts and required frontend/backend event chains. Author independent tests before reading builder tests. For UI criteria use fresh factory_web_tester subagents with agent-browser. Inspect correlated logs and record evidence per DC-* criterion with criterion-audit, then audit all objective axes. Never edit code, docs/product/**, or the roadmap. Builder defects return programmatically to the builder; planning gaps route to the planner. Only a proven human-held external blocker may set NEEDS_SETUP. Only subjective UX may reach the user."
 else
-  MSG="RE-VALIDATE: $ISSUE — the builder reports it fixed the last round's defects. Re-run your tests against the running artifact (per the ticket's target_type; port $PORT for web/service), update kanban/validation/$ISSUE.md (bump the round), and route again: PASS -> 'kanban-update $ISSUE VALIDATED'; FAIL -> queue defects to the builder ($ISSUE)."
+  MSG="RE-VALIDATE: $ISSUE — the builder reports it fixed the last round's defects. Re-run the failed axes plus a regression pass over axes touching the changed code (bring the app up per what was built; port $PORT if it serves one). Re-record axes with 'kanban-audit $ISSUE axis ...', run 'kanban-audit $ISSUE finalize', then route again: overall pass -> 'kanban-update $ISSUE VALIDATED'; builder-defect -> queue defects to the builder ($ISSUE); external -> 'kanban-update $ISSUE NEEDS_SETUP \"...\"'."
 fi
 
 KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/tmux-delegate" "$SESSION" "$MSG"
