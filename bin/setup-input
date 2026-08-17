@@ -1,0 +1,11 @@
+#!/bin/bash
+# Read one setup value from stdin and write it directly to its approved target. Never print it.
+set -euo pipefail
+ISSUE=${1:-}; FIELD=${2:-}
+ROOT=${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}
+CONTRACT="$ROOT/.factory/runtime/setup-contracts/$ISSUE.json"
+[ -f "$CONTRACT" ] || { echo 'No setup input contract exists for this ticket.'; exit 1; }
+"$ROOT/bin/setup-input-worker" "$ROOT" "$CONTRACT" "$FIELD"
+KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-log" setup_value_stored issue="$ISSUE" field="$FIELD" || true
+KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-notify" "$ISSUE" "External setup field '$FIELD' is available. Re-check the requested condition. The value was not included." || true
+echo 'Value stored. The value was not logged or sent to an agent.'

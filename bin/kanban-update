@@ -96,10 +96,16 @@ if [ "$STATUS" = "VALIDATED" ]; then
     exit 1
   fi
   NUT=$(grep -m1 '^needs_user_test:' "$KANBAN_FILE" | awk '{print $2}'); [ -z "$NUT" ] && NUT=true
-  if [ "$NUT" = "false" ]; then
+  SKIP_UX=$(python3 - "$PROJECT_ROOT/.factory/project.json" <<'PY'
+import json,sys
+try: print("true" if json.load(open(sys.argv[1])).get("skip_user_ux",False) else "false")
+except Exception: print("false")
+PY
+)
+  if [ "$NUT" = "false" ] || [ "$SKIP_UX" = "true" ]; then
     export KANBAN_PROJECT_ROOT="$PROJECT_ROOT"
-    echo "[$ISSUE] validated (function/performance/requirements); needs_user_test=false — integrating to DONE"
-    exec kanban-done "$ISSUE" "auto: validated; no user test required"
+    echo "[$ISSUE] objective validation passed; subjective UX gate is disabled — opening the pull request"
+    exec kanban-done "$ISSUE" "auto: objective validation passed; subjective UX skipped by project policy"
   fi
   # A user-test ticket needs a persistent launcher. The terminating candidate check is separate.
   TC=$(grep "^test_launcher:" "$KANBAN_FILE" | head -1 | sed 's/^test_launcher:[[:space:]]*//')

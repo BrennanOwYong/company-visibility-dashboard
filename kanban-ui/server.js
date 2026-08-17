@@ -118,6 +118,21 @@ function parseTestCard(text) {
   return sections;
 }
 
+function readSetupContract(issue) {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(issue || '')) return null;
+  const file = path.join(PROJECT_ROOT, '.factory', 'runtime', 'setup-contracts', `${issue}.json`);
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) { return null; }
+}
+
+function preflightSummary() {
+  try {
+    const report=JSON.parse(fs.readFileSync(PREFLIGHT_FILE,'utf8'));
+    const blocked=(report.checks||[]).filter(check=>check.status==='blocked');
+    if(!blocked.length)return {ok:true,message:'Verification passed. Project setup is ready.'};
+    return {ok:false,message:blocked.map(check=>`${check.label}: ${check.detail}`).join(' ').slice(0,360)};
+  } catch(_){return {ok:false,message:'Preflight did not produce a readable result.'};}
+}
+
 function readRoadmap() {
   try {
     const data = JSON.parse(fs.readFileSync(ROADMAP_FILE, 'utf8'));
@@ -288,11 +303,22 @@ function renderTicketCard(t, context, allTickets) {
     <p><small>The repository must already exist. Do not put a token or password in this URL.</small></p>
     <button class="launch-btn" onclick="saveGitHubSetup('${esc(t.issue)}')">Save URL and recheck</button>
     <button class="launch-btn" onclick="recheckSetup()">Recheck after authentication</button>
+    <div id="setup-result-${esc(t.issue)}" class="fb-result" aria-live="polite"></div>
   </div>` : '';
+  const setupContract = readSetupContract(t.issue);
+  const setupInputs = setupContract && Array.isArray(setupContract.fields) ? setupContract.fields.map(field => {
+    const id=String(field.id||''); const label=String(field.label||id); const secret=field.kind==='secret';
+    if(!/^[a-z0-9][a-z0-9_-]*$/.test(id))return '';
+    return `<div class="github-setup"><label for="setup-${esc(t.issue)}-${esc(id)}"><strong>${esc(label)}</strong></label>
+      <input id="setup-${esc(t.issue)}-${esc(id)}" type="${secret?'password':'text'}" autocomplete="off" style="box-sizing:border-box;width:100%;margin:8px 0;padding:10px;border:1px solid #475569;border-radius:7px;background:#0f172a;color:#e2e8f0">
+      <button class="launch-btn" onclick="submitSetupValue('${esc(t.issue)}','${esc(id)}')">Submit</button>
+      <button class="launch-btn" onclick="verifySetupValue('${esc(t.issue)}','${esc(id)}')">Verify</button>
+      <div id="setup-result-${esc(t.issue)}-${esc(id)}" class="fb-result" aria-live="polite"></div></div>`;
+  }).join('') : '';
   const setup = (t.status === 'NEEDS_SETUP' || t.status === 'NEEDS_HUMAN')
     ? t.system
       ? `<div class="test-card"><strong>Required action</strong><p>${esc(t.requiredAction || 'Resolve this project setup condition.')}</p>${githubSetup}<small>This ticket closes automatically when preflight passes.</small></div>`
-      : `<div class="test-card"><a class="tc-feature-link" href="/file?path=${encodeURIComponent(`docs/delivery/tickets/${t.issue}-setup.md`)}">Setup instructions ↗</a><button class="launch-btn" onclick="resolveSetup('${esc(t.issue)}')">I completed the setup</button></div>`
+      : `<div class="test-card"><a class="tc-feature-link" href="/file?path=${encodeURIComponent(`docs/delivery/tickets/${t.issue}-setup.md`)}">Setup instructions ↗</a>${setupInputs || '<p>Complete the external action, then verify it.</p>'}<button class="launch-btn" onclick="resolveSetup('${esc(t.issue)}')">I completed the setup</button></div>`
     : '';
   return `<div class="ticket" id="ticket-${esc(t.issue)}" role="link" tabindex="0"
     onclick="if(!event.target.closest('a,button,input,textarea,label'))location.href='${ticketHref}'"
@@ -565,13 +591,26 @@ async function submitFeedback(issue) {
 <script>
 async function saveGitHubSetup(issue){
   const input=document.getElementById('github-url-'+issue); const url=(input&&input.value||'').trim();
+  const out=document.getElementById('setup-result-'+issue); out.textContent='Checking…';
   const r=await fetch('/github-setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
-  const j=await r.json(); alert(j.message||j.error||'Updated');
+  const j=await r.json(); out.textContent=j.message||j.error||'Updated'; out.style.color=j.ok?'#10b981':'#ef4444';
 }
 async function recheckSetup(){
-  const r=await fetch('/preflight-recheck',{method:'POST'}); const j=await r.json(); alert(j.message||j.error||'Checked');
+  const out=document.querySelector('[id^="setup-result-system-preflight-github-setup"]'); if(out)out.textContent='Checking…';
+  const r=await fetch('/preflight-recheck',{method:'POST'}); const j=await r.json(); if(out){out.textContent=j.message||j.error||'Checked';out.style.color=j.ok?'#10b981':'#ef4444';}
 }
-async function resolveSetup(issue){if(!confirm('Confirm the requested external setup is complete?'))return;const r=await fetch('/setup-resolved',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issue})});const j=await r.json();alert(j.message||j.error||'Updated');}
+async function submitSetupValue(issue,field){
+  const input=document.getElementById('setup-'+issue+'-'+field),out=document.getElementById('setup-result-'+issue+'-'+field);
+  out.textContent='Storing…'; const value=input.value;
+  const r=await fetch('/setup-value',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issue,field,value})});
+  input.value=''; const j=await r.json(); out.textContent=j.message||j.error||'Stored'; out.style.color=j.ok?'#10b981':'#ef4444';
+}
+async function verifySetupValue(issue,field){
+  const out=document.getElementById('setup-result-'+issue+'-'+field);out.textContent='Verifying…';
+  const r=await fetch('/setup-verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issue,field})});
+  const j=await r.json();out.textContent=j.message||j.error||'Checked';out.style.color=j.ok?'#10b981':'#ef4444';
+}
+async function resolveSetup(issue){const r=await fetch('/setup-resolved',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issue})});const j=await r.json();const out=document.getElementById('setup-result-'+issue);if(out){out.textContent=j.message||j.error||'Updated';out.style.color=j.ok?'#10b981':'#ef4444';}}
 </script></body>
 </html>`;
 }
@@ -1589,6 +1628,31 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === 'POST' && req.url === '/setup-value') {
+    let body=''; req.on('data',d=>{ if(body.length<1048576)body+=d; }); req.on('end',()=>{
+      try {
+        const data=JSON.parse(body||'{}'),issue=String(data.issue||''),field=String(data.field||''),value=String(data.value||'');
+        if(!/^[a-z0-9][a-z0-9-]*$/.test(issue)||!/^[a-z0-9][a-z0-9_-]*$/.test(field)||!value)throw new Error('Ticket, field, and value are required.');
+        const child=spawn(path.join(PROJECT_ROOT,'bin','setup-input'),[issue,field],{cwd:PROJECT_ROOT,env:{...process.env,KANBAN_PROJECT_ROOT:PROJECT_ROOT},stdio:['pipe','pipe','pipe']});
+        let output=''; child.stdout.on('data',d=>output+=d); child.stderr.on('data',d=>output+=d); child.stdin.end(value);
+        child.on('close',code=>{res.writeHead(code===0?200:400,{'Content-Type':'application/json'});res.end(JSON.stringify(code===0?{ok:true,message:'Value stored. The agent received only a field-available event.'}:{ok:false,error:(output.trim()||'The value could not be stored.').slice(0,240)}));});
+        child.on('error',e=>{res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:false,error:e.message}));});
+      } catch(e){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:false,error:e.message}));}
+    });return;
+  }
+
+  if (req.method === 'POST' && req.url === '/setup-verify') {
+    let body='';req.on('data',d=>body+=d);req.on('end',()=>{
+      try{const data=JSON.parse(body||'{}'),issue=String(data.issue||''),field=String(data.field||'');
+        if(!/^[a-z0-9][a-z0-9-]*$/.test(issue)||!/^[a-z0-9][a-z0-9_-]*$/.test(field))throw new Error('Valid ticket and field are required.');
+        const child=spawn(path.join(PROJECT_ROOT,'bin','setup-verify'),[issue,field],{cwd:PROJECT_ROOT,env:{...process.env,KANBAN_PROJECT_ROOT:PROJECT_ROOT},stdio:['ignore','pipe','pipe']});
+        let output='';child.stdout.on('data',d=>output+=d);child.stderr.on('data',d=>output+=d);
+        child.on('close',code=>{res.writeHead(code===0?200:400,{'Content-Type':'application/json'});res.end(JSON.stringify(code===0?{ok:true,message:'Verification passed. The builder was notified.'}:{ok:false,error:(output.trim()||'Verification failed.').slice(0,240)}));});
+        child.on('error',e=>{res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:false,error:e.message}));});
+      }catch(e){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:false,error:e.message}));}
+    });return;
+  }
+
   if (req.method === 'POST' && req.url === '/github-setup') {
     let body = ''; req.on('data', d => body += d); req.on('end', () => {
       try {
@@ -1603,16 +1667,18 @@ const server = http.createServer((req, res) => {
           execFileSync('git', ['-C', PROJECT_ROOT, 'remote', 'set-url', 'origin', normalized], {stdio:'ignore'});
         } catch (_) { execFileSync('git', ['-C', PROJECT_ROOT, 'remote', 'add', 'origin', normalized], {stdio:'ignore'}); }
         try { execFileSync(path.join(PROJECT_ROOT, 'bin', 'factory-preflight'), [], {cwd:PROJECT_ROOT,stdio:'ignore',env:{...process.env,KANBAN_PROJECT_ROOT:PROJECT_ROOT}}); } catch (_) {}
+        const result=preflightSummary();
         res.writeHead(200, {'Content-Type':'application/json'});
-        res.end(JSON.stringify({ok:true,message:'GitHub repository URL saved. Preflight checked repository access and authentication.'}));
+        res.end(JSON.stringify(result));
       } catch(e) { res.writeHead(400, {'Content-Type':'application/json'}); res.end(JSON.stringify({ok:false,error:e.message})); }
     }); return;
   }
 
   if (req.method === 'POST' && req.url === '/preflight-recheck') {
     try { execFileSync(path.join(PROJECT_ROOT, 'bin', 'factory-preflight'), [], {cwd:PROJECT_ROOT,stdio:'ignore',env:{...process.env,KANBAN_PROJECT_ROOT:PROJECT_ROOT}}); } catch (_) {}
+    const result=preflightSummary();
     res.writeHead(200, {'Content-Type':'application/json'});
-    res.end(JSON.stringify({ok:true,message:'Preflight completed. The board will update when setup state changes.'}));
+    res.end(JSON.stringify(result));
     return;
   }
 
