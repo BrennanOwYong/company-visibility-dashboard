@@ -4,6 +4,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { execFileSync } = require('child_process');
 
@@ -30,18 +31,8 @@ for (const rel of ['audit', 'validation', 'observability']) {
 const eventDir = path.join(PROJECT_ROOT, '.factory', 'events');
 if (fs.existsSync(eventDir)) watchForPush(eventDir);
 
-// GitHub is outside the local file system. Poll only its pull-request state. A merge causes
-// github-sync to update local ticket files; those file events then push the UI update by SSE.
-setInterval(() => {
-  const sync = path.join(PROJECT_ROOT, 'bin', 'github-sync');
-  if (fs.existsSync(sync)) {
-    const child = spawn(sync, [], {cwd: PROJECT_ROOT, stdio: 'ignore', env: {...process.env, KANBAN_PROJECT_ROOT: PROJECT_ROOT}});
-    child.on('error', () => {});
-  }
-}, 15000).unref();
-
 // Shared client script: subscribe to the push stream. A page may define window.__onLive to update
-// in place (the graph does); otherwise it reloads — but ONLY on a real change, never on a timer.
+// in place (the graph does); otherwise it reloads only after a state-producing file event.
 const LIVE_SCRIPT = `<script>try{const es=new EventSource('/events');es.onmessage=function(){if(window.__onLive){window.__onLive()}else{location.reload()}};es.onerror=function(){};}catch(e){}</script>`;
 const PORTS_FILE = path.join(KANBAN_DIR, '.ports.json');
 
@@ -276,8 +267,9 @@ function renderTestCardBlock(card, test_command, feature, issue, context, needsU
 }
 
 function renderTicketCard(t, context, allTickets) {
-  const featureHref = t.feature_doc ? `/file?path=${encodeURIComponent(t.feature_doc)}` : '/prd';
-  const title = t.title ? `<p class="ticket-title">${esc(t.title)}</p>` : '';
+  const ticketHref = `/ticket/${encodeURIComponent(t.issue)}`;
+  const featureHref = t.feature_doc ? `/file?path=${encodeURIComponent(t.feature_doc)}` : ticketHref;
+  const title = t.title ? `<p class="ticket-title"><a href="${ticketHref}">${esc(t.title)}</a></p>` : '';
   // Before completion, the brief's Intent is the ticket's description; once the builder
   // writes What-was-built, that takes over.
   const desc = t.whatBuilt
@@ -302,9 +294,11 @@ function renderTicketCard(t, context, allTickets) {
       ? `<div class="test-card"><strong>Required action</strong><p>${esc(t.requiredAction || 'Resolve this project setup condition.')}</p>${githubSetup}<small>This ticket closes automatically when preflight passes.</small></div>`
       : `<div class="test-card"><a class="tc-feature-link" href="/file?path=${encodeURIComponent(`docs/delivery/tickets/${t.issue}-setup.md`)}">Setup instructions ↗</a><button class="launch-btn" onclick="resolveSetup('${esc(t.issue)}')">I completed the setup</button></div>`
     : '';
-  return `<div class="ticket" id="ticket-${esc(t.issue)}">
+  return `<div class="ticket" id="ticket-${esc(t.issue)}" role="link" tabindex="0"
+    onclick="if(!event.target.closest('a,button,input,textarea,label'))location.href='${ticketHref}'"
+    onkeydown="if((event.key==='Enter'||event.key===' ')&&!event.target.closest('a,button,input,textarea')){event.preventDefault();location.href='${ticketHref}'}">
     <div class="ticket-header">
-      <span class="issue">${esc(t.issue)}</span>
+      <a class="issue" href="${ticketHref}">${esc(t.issue)}</a>
       <a class="feature-badge" href="${featureHref}">${esc(t.feature || '—')}</a>
     </div>
     ${title}
@@ -1382,6 +1376,37 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === 'POST' && req.url === '/webhooks/github') {
+    let body = ''; req.on('data', d => body += d); req.on('end', () => {
+      try {
+        const secret = process.env.FACTORY_GITHUB_WEBHOOK_SECRET || '';
+        if (!secret) throw new Error('GitHub webhook secret is not configured');
+        const supplied = String(req.headers['x-hub-signature-256'] || '');
+        const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(body).digest('hex');
+        if (supplied.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) {
+          res.writeHead(401, {'Content-Type':'application/json'}); res.end(JSON.stringify({ok:false,error:'Invalid webhook signature'})); return;
+        }
+        if (req.headers['x-github-event'] !== 'pull_request') {
+          res.writeHead(202, {'Content-Type':'application/json'}); res.end(JSON.stringify({ok:true,message:'Event ignored'})); return;
+        }
+        const payload = JSON.parse(body || '{}');
+        if (payload.action !== 'closed' || !payload.pull_request || !payload.pull_request.merged) {
+          res.writeHead(202, {'Content-Type':'application/json'}); res.end(JSON.stringify({ok:true,message:'Pull request has not merged'})); return;
+        }
+        const ref = String(payload.pull_request.head && payload.pull_request.head.ref || '');
+        const issue = ref.startsWith('feat/') ? ref.slice(5) : '';
+        const head = String(payload.pull_request.head && payload.pull_request.head.sha || '');
+        const merged = String(payload.pull_request.merge_commit_sha || '');
+        if (!/^[a-z0-9][a-z0-9-]*$/.test(issue) || !/^[0-9a-f]{40}$/.test(head) || !/^[0-9a-f]{40}$/.test(merged)) throw new Error('Webhook pull request does not match a factory feature branch');
+        const logDir = path.join(PROJECT_ROOT, '.factory', 'runtime'); fs.mkdirSync(logDir, {recursive:true});
+        const fd = fs.openSync(path.join(logDir, 'github-webhook.log'), 'a');
+        const child = spawn(path.join(PROJECT_ROOT, 'bin', 'github-webhook'), [issue, head, merged], {cwd:PROJECT_ROOT,stdio:['ignore',fd,fd],env:{...process.env,KANBAN_PROJECT_ROOT:PROJECT_ROOT}});
+        child.on('close', () => fs.closeSync(fd)); child.on('error', () => { try{fs.closeSync(fd)}catch(_){} });
+        res.writeHead(202, {'Content-Type':'application/json'}); res.end(JSON.stringify({ok:true,message:`Merge event accepted for ${issue}`}));
+      } catch(e) { res.writeHead(400, {'Content-Type':'application/json'}); res.end(JSON.stringify({ok:false,error:e.message})); }
+    }); return;
+  }
+
   if (req.method === 'POST' && req.url === '/launch') {
     let body = '';
     req.on('data', d => body += d);
@@ -1620,4 +1645,3 @@ const refreshPreflight = () => {
   child.on('error', () => { preflightRunning = false; });
 };
 setTimeout(refreshPreflight, 1000).unref();
-setInterval(refreshPreflight, 15000).unref();
