@@ -53,8 +53,6 @@ trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
 if ! git -C "$WORKTREE" rebase "$BASE"; then
   git -C "$WORKTREE" rebase --abort 2>/dev/null || true
   sed -i 's/^status: .*/status: REBASE_CONFLICT/' "$TICKET"
-  printf '\n### %s — REBASE_CONFLICT\nRebase onto %s failed. Builder must resolve and rerun READY_FOR_TESTING.\n' \
-    "$(date '+%Y-%m-%d %H:%M')" "$BASE" >> "$TICKET"
   KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-log" rebase_conflict issue="$ISSUE" base="$BASE" 2>/dev/null || true
   exit 1
 fi

@@ -112,8 +112,6 @@ fi
 
 sed -i "s/^status: .*/status: $STATUS/" "$KANBAN_FILE"
 
-printf '\n### %s — %s\n%s\n' "$(date '+%Y-%m-%d %H:%M')" "$STATUS" "${NOTES:-no notes}" >> "$KANBAN_FILE"
-
 TS=$(date +%s%3N 2>/dev/null || python3 -c "import time; print(int(time.time()*1000))" 2>/dev/null || echo "0")
 printf '{"ts":%s,"issue":"%s","from":"%s","to":"%s","notes":%s}\n' \
   "$TS" "$ISSUE" "${PREV_STATUS:-NONE}" "$STATUS" \
