@@ -1,0 +1,14 @@
+{
+  "name": "company-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "typecheck": "node --check server.js && node --check public/app.js",
+    "lint": "node scripts/lint.js",
+    "test:unit": "node tests/dashboard-shell.test.js",
+    "test:contract": "node tests/dashboard-shell.test.js",
+    "test:browser": "node tests/dashboard-shell.test.js",
+    "test:events": "node tests/dashboard-shell.test.js",
+    "dev:test": "node server.js"
+  }
+}
