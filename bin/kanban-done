@@ -6,5 +6,5 @@ FEEDBACK=${2:-approved}
 ROOT=${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
 TICKET="$ROOT/kanban/$ISSUE.md"
 [ -n "$ISSUE" ] && [ -f "$TICKET" ] || { echo "Usage: kanban-done <issue> [feedback]"; exit 1; }
-printf '\n## Feedback from user\n%s\n' "$FEEDBACK" >> "$TICKET"
+KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-log" user_gate_completed issue="$ISSUE" outcome="$FEEDBACK" || true
 exec env KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/ticket-integrate" "$ISSUE"

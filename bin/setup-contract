@@ -1,0 +1,24 @@
+#!/bin/bash
+# Declare one approved external input without storing its value.
+set -euo pipefail
+ISSUE=${1:-}; FIELD=${2:-}; LABEL=${3:-}; ENV_KEY=${4:-}; shift 4 || true
+ROOT=${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}
+[[ "$ISSUE" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo 'invalid issue'; exit 1; }
+[[ "$FIELD" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || { echo 'invalid field'; exit 1; }
+[[ "$ENV_KEY" =~ ^[A-Z][A-Z0-9_]*$ ]] || { echo 'invalid environment key'; exit 1; }
+[ -n "$LABEL" ] || { echo 'label is required'; exit 1; }
+OUT="$ROOT/.factory/runtime/setup-contracts/$ISSUE.json"; mkdir -p "$(dirname "$OUT")"
+python3 - "$OUT" "$ISSUE" "$FIELD" "$LABEL" "$ENV_KEY" "$@" <<'PY'
+import json,os,sys,tempfile
+path,issue,field,label,key,*verify=sys.argv[1:]
+data={"schema_version":1,"issue":issue,"fields":[]}
+if os.path.exists(path):
+    data=json.load(open(path,encoding="utf-8"))
+entry={"id":field,"label":label,"kind":"secret","target":{"type":"env","file":".env.local","key":key},
+       "verify":verify,"failure_message":"Verification failed. Check the value and the external account access."}
+data["fields"]=[item for item in data.get("fields",[]) if item.get("id")!=field]+[entry]
+fd,tmp=tempfile.mkstemp(dir=os.path.dirname(path),prefix='.setup-contract-',text=True)
+with os.fdopen(fd,'w',encoding='utf-8') as h: json.dump(data,h,indent=2); h.write('\n')
+os.replace(tmp,path)
+PY
+echo "Setup field declared for $ISSUE: $FIELD"

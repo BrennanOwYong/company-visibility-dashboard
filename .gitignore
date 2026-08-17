@@ -41,3 +41,7 @@
 # Generated Python bytecode
 __pycache__/
 *.pyc
+
+# Human-held setup values. The factory writes these directly and never commits them.
+.env.local
+.env.test.local
