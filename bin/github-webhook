@@ -1,0 +1,39 @@
+#!/bin/bash
+# Apply one authenticated GitHub pull-request merge event. No polling.
+set -euo pipefail
+
+ISSUE=${1:-}
+HEAD_SHA=${2:-}
+MERGED_SHA=${3:-}
+ROOT=${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel)}
+TICKET="$ROOT/kanban/$ISSUE.md"
+
+[[ "$ISSUE" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo 'invalid issue'; exit 1; }
+[[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'invalid head SHA'; exit 1; }
+[[ "$MERGED_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'invalid merge SHA'; exit 1; }
+[ -f "$TICKET" ] || { echo "missing ticket: $ISSUE"; exit 1; }
+[ "$(grep -m1 '^status:' "$TICKET" | awk '{print $2}')" = PR_OPEN ] || { echo "ticket is not PR_OPEN: $ISSUE"; exit 1; }
+CANDIDATE=$(grep -m1 '^candidate_commit:' "$TICKET" | awk '{print $2}')
+[ "$CANDIDATE" = "$HEAD_SHA" ] || { echo 'webhook head does not match validated candidate'; exit 1; }
+
+LOCK="$ROOT/.factory/runtime/locks/github-webhook"
+mkdir -p "$(dirname "$LOCK")"
+mkdir "$LOCK" 2>/dev/null || { echo 'GitHub webhook integration is busy'; exit 1; }
+trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+
+git -C "$ROOT" fetch origin main
+git -C "$ROOT" merge-base --is-ancestor "$MERGED_SHA" origin/main || { echo 'merge SHA is not on origin/main'; exit 1; }
+[ "$(git -C "$ROOT" branch --show-current)" = main ] || { echo 'visible checkout is not main'; exit 1; }
+git -C "$ROOT" pull --ff-only origin main
+
+python3 - "$TICKET" "$MERGED_SHA" <<'PY'
+import re,sys
+path,merged=sys.argv[1:]
+text=open(path,encoding='utf-8').read()
+text=re.sub(r'^status:.*$','status: DONE',text,flags=re.M)
+text=re.sub(r'^merged_commit:.*$',f'merged_commit: {merged}',text,flags=re.M)
+open(path,'w',encoding='utf-8').write(text)
+PY
+
+KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-log" pull_request_merged issue="$ISSUE" commit="$MERGED_SHA" || true
+KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/kanban-dispatch"

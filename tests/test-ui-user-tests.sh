@@ -15,4 +15,6 @@ KANBAN_PROJECT_ROOT="$ROOT" KANBAN_UI_PORT="$PORT" node "$SOURCE/kanban-ui/serve
 for _ in $(seq 1 30); do curl -fsS "http://127.0.0.1:$PORT/user-tests" >"$ROOT/page" 2>/dev/null && break; sleep .1; done
 grep -q 'Help screen' "$ROOT/page"
 grep -q 'Test Me' "$ROOT/page"
+curl -fsS "http://127.0.0.1:$PORT/" >"$ROOT/board"
+grep -q 'href="/ticket/help-screen"' "$ROOT/board"
 echo 'UX test selector: PASS'
