@@ -501,6 +501,15 @@ header h1{font-size:19px;font-weight:700;color:#f1f5f9}
   ${completeCol}
 </div>
 <script>
+// A ticket event refreshes only the board region. The browser page does not reload.
+window.__onLive=async function(){
+  try {
+    const html=await fetch('/',{cache:'no-store'}).then(r=>r.text());
+    const next=new DOMParser().parseFromString(html,'text/html').querySelector('.board');
+    const current=document.querySelector('.board');
+    if(next&&current)current.replaceWith(next);
+  } catch(e) {}
+};
 // Blocked column toggle
 function toggleBlockedCol(hdr) {
   const slide = document.getElementById('blocked-slide');
