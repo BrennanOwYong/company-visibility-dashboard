@@ -60,11 +60,41 @@ report={"schema_version":1,"checked_at":int(time.time()),"ready":not any(c["stat
 tmp=out.with_suffix(".tmp"); tmp.write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8"); tmp.replace(out)
 kanban=root/"kanban"; kanban.mkdir(exist_ok=True)
 active=set()
+def write_if_changed(path, content):
+    if path.exists() and path.read_text(encoding="utf-8") == content:
+        return
+    path.write_text(content,encoding="utf-8")
+
+github_checks=[check for check in checks if check["id"] in ("git-origin","github-auth")]
+github_blocked=[check for check in github_checks if check["status"] == "blocked"]
+if github_blocked:
+    issue="system-preflight-github-setup"; active.add(issue)
+    details="\n".join(f"- {check['label']}: {check['detail']}" for check in github_checks)
+    actions="\n".join(f"- {check['action']}" for check in github_blocked if check.get("action"))
+    content=f"""---
+issue: {issue}
+feature: system-preflight
+title: GitHub setup
+status: NEEDS_HUMAN
+system: true
+check_id: github-setup
+needs_user_test: false
+---
+
+## Intent
+
+{details}
+
+## Required action
+
+{actions or '- Complete the GitHub repository and authentication setup.'}
+"""
+    write_if_changed(kanban/f"{issue}.md",content)
+
 for check in checks:
-    if check["status"] != "blocked": continue
+    if check["status"] != "blocked" or check["id"] in ("git-origin","github-auth"): continue
     issue=f"system-preflight-{check['id']}"; active.add(issue)
-    ticket=kanban/f"{issue}.md"
-    ticket.write_text(f"""---
+    content=f"""---
 issue: {issue}
 feature: system-preflight
 title: {check['label']}
@@ -81,7 +111,8 @@ needs_user_test: false
 ## Required action
 
 {check['action'] or 'Resolve the reported project setup condition.'}
-""",encoding="utf-8")
+"""
+    write_if_changed(kanban/f"{issue}.md",content)
 for ticket in kanban.glob("system-preflight-*.md"):
     if ticket.stem not in active: ticket.unlink()
 print(json.dumps(report,indent=2))
