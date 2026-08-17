@@ -29,8 +29,6 @@ for (const rel of ['audit', 'validation', 'observability']) {
 }
 const eventDir = path.join(PROJECT_ROOT, '.factory', 'events');
 if (fs.existsSync(eventDir)) watchForPush(eventDir);
-const runtimeDir = path.join(PROJECT_ROOT, '.factory', 'runtime');
-if (fs.existsSync(runtimeDir)) watchForPush(runtimeDir);
 
 // GitHub is outside the local file system. Poll only its pull-request state. A merge causes
 // github-sync to update local ticket files; those file events then push the UI update by SSE.
@@ -41,13 +39,6 @@ setInterval(() => {
     child.on('error', () => {});
   }
 }, 15000).unref();
-setInterval(() => {
-  const preflight = path.join(PROJECT_ROOT, 'bin', 'factory-preflight');
-  if (fs.existsSync(preflight)) {
-    const child = spawn(preflight, [], {cwd: PROJECT_ROOT, stdio: 'ignore', env: {...process.env, KANBAN_PROJECT_ROOT: PROJECT_ROOT}});
-    child.on('error', () => {});
-  }
-}, 30000).unref();
 
 // Shared client script: subscribe to the push stream. A page may define window.__onLive to update
 // in place (the graph does); otherwise it reloads — but ONLY on a real change, never on a timer.
@@ -166,6 +157,7 @@ function readTickets() {
         title: plan.title || fm.title || '',
         status: fm.status || 'NOT_STARTED',
         system: fm.system === 'true',
+        check_id: fm.check_id || '',
         needs_user_test: typeof plan.subjective_ux === 'boolean' ? plan.subjective_ux : (fm.needs_user_test || 'true').trim() !== 'false',
         port: fm.port || '',
         test_check: fm.test_check || '',
@@ -294,9 +286,20 @@ function renderTicketCard(t, context, allTickets) {
   const last = t.lastUpdate
     ? `<div class="last">${esc(t.lastUpdate.replace(/^### /, ''))}</div>` : '';
 
+  let originUrl = '';
+  if (t.check_id === 'github-setup') {
+    try { originUrl = execFileSync('git', ['-C', PROJECT_ROOT, 'remote', 'get-url', 'origin'], {encoding:'utf8'}).trim(); } catch (_) {}
+  }
+  const githubSetup = t.check_id === 'github-setup' ? `<div class="github-setup">
+    <label for="github-url-${esc(t.issue)}"><strong>GitHub repository URL</strong></label>
+    <input id="github-url-${esc(t.issue)}" type="url" value="${esc(originUrl)}" placeholder="https://github.com/owner/repository.git" style="box-sizing:border-box;width:100%;margin:8px 0;padding:10px;border:1px solid #475569;border-radius:7px;background:#0f172a;color:#e2e8f0">
+    <p><small>The repository must already exist. Do not put a token or password in this URL.</small></p>
+    <button class="launch-btn" onclick="saveGitHubSetup('${esc(t.issue)}')">Save URL and recheck</button>
+    <button class="launch-btn" onclick="recheckSetup()">Recheck after authentication</button>
+  </div>` : '';
   const setup = (t.status === 'NEEDS_SETUP' || t.status === 'NEEDS_HUMAN')
     ? t.system
-      ? `<div class="test-card"><strong>Required action</strong><p>${esc(t.requiredAction || 'Resolve this project setup condition.')}</p><small>This ticket closes automatically when preflight passes.</small></div>`
+      ? `<div class="test-card"><strong>Required action</strong><p>${esc(t.requiredAction || 'Resolve this project setup condition.')}</p>${githubSetup}<small>This ticket closes automatically when preflight passes.</small></div>`
       : `<div class="test-card"><a class="tc-feature-link" href="/file?path=${encodeURIComponent(`docs/delivery/tickets/${t.issue}-setup.md`)}">Setup instructions ↗</a><button class="launch-btn" onclick="resolveSetup('${esc(t.issue)}')">I completed the setup</button></div>`
     : '';
   return `<div class="ticket" id="ticket-${esc(t.issue)}">
@@ -556,7 +559,17 @@ async function submitFeedback(issue) {
   }
 }
 </script>
-<script>async function resolveSetup(issue){if(!confirm('Confirm the requested external setup is complete?'))return;const r=await fetch('/setup-resolved',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issue})});const j=await r.json();alert(j.message||j.error||'Updated');}</script></body>
+<script>
+async function saveGitHubSetup(issue){
+  const input=document.getElementById('github-url-'+issue); const url=(input&&input.value||'').trim();
+  const r=await fetch('/github-setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
+  const j=await r.json(); alert(j.message||j.error||'Updated');
+}
+async function recheckSetup(){
+  const r=await fetch('/preflight-recheck',{method:'POST'}); const j=await r.json(); alert(j.message||j.error||'Checked');
+}
+async function resolveSetup(issue){if(!confirm('Confirm the requested external setup is complete?'))return;const r=await fetch('/setup-resolved',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issue})});const j=await r.json();alert(j.message||j.error||'Updated');}
+</script></body>
 </html>`;
 }
 
@@ -1539,6 +1552,33 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ok: false, error: e.message}));
       }
     });
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/github-setup') {
+    let body = ''; req.on('data', d => body += d); req.on('end', () => {
+      try {
+        const raw = String(JSON.parse(body || '{}').url || '').trim();
+        const parsed = new URL(raw);
+        const parts = parsed.pathname.replace(/\.git$/, '').split('/').filter(Boolean);
+        if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com' || parsed.username || parsed.password || parsed.search || parsed.hash || parts.length !== 2) {
+          throw new Error('Use an HTTPS GitHub repository URL with owner and repository. Do not include credentials.');
+        }
+        const normalized = `https://github.com/${parts[0]}/${parts[1]}.git`;
+        try { execFileSync('git', ['-C', PROJECT_ROOT, 'remote', 'get-url', 'origin'], {stdio:'ignore'});
+          execFileSync('git', ['-C', PROJECT_ROOT, 'remote', 'set-url', 'origin', normalized], {stdio:'ignore'});
+        } catch (_) { execFileSync('git', ['-C', PROJECT_ROOT, 'remote', 'add', 'origin', normalized], {stdio:'ignore'}); }
+        try { execFileSync(path.join(PROJECT_ROOT, 'bin', 'factory-preflight'), [], {cwd:PROJECT_ROOT,stdio:'ignore',env:{...process.env,KANBAN_PROJECT_ROOT:PROJECT_ROOT}}); } catch (_) {}
+        res.writeHead(200, {'Content-Type':'application/json'});
+        res.end(JSON.stringify({ok:true,message:'GitHub repository URL saved. Preflight checked repository access and authentication.'}));
+      } catch(e) { res.writeHead(400, {'Content-Type':'application/json'}); res.end(JSON.stringify({ok:false,error:e.message})); }
+    }); return;
+  }
+
+  if (req.method === 'POST' && req.url === '/preflight-recheck') {
+    try { execFileSync(path.join(PROJECT_ROOT, 'bin', 'factory-preflight'), [], {cwd:PROJECT_ROOT,stdio:'ignore',env:{...process.env,KANBAN_PROJECT_ROOT:PROJECT_ROOT}}); } catch (_) {}
+    res.writeHead(200, {'Content-Type':'application/json'});
+    res.end(JSON.stringify({ok:true,message:'Preflight completed. The board will update when setup state changes.'}));
     return;
   }
 
