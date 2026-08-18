@@ -1,7 +1,7 @@
 #!/bin/bash
 # spawn-builder.sh <issue-name> <handoff-doc-path> [--repo <repo-root>] [--port <port>] [--depends-on <iss1,iss2>] [--feature <feature-name>]
 # Creates a git worktree in the specified repo, kanban issue entry, and tmux session for a builder agent.
-set -e
+set -euo pipefail
 
 SCRIPT_DIR_SB="$(cd "$(dirname "$0")" && pwd)"
 
@@ -84,28 +84,10 @@ sed -i "s|^dispatch_base:.*|dispatch_base: $DISPATCH_BASE|" "$KFILE"
 CUR_REPO=$(grep "^repo:" "$KFILE" | sed 's/^repo:[[:space:]]*//')
 [ -z "$CUR_REPO" ] && sed -i "s|^repo:.*|repo: $REPO_ROOT|" "$KFILE"
 
-# Create tmux session. No FEATURE_PORT — a port is allocated when the ticket's
-# validator boots (kanban-port) and read from the kanban file frontmatter.
-# Builders use the low-cost execution model. Planning sessions use the high-reasoning model.
-tmux new-session -d -s "$ISSUE" -c "$WORKTREE_PATH" \
-  -e "PATH=$PROJECT_ROOT/bin:$PATH" \
-  -e "KANBAN_PROJECT_ROOT=$PROJECT_ROOT" \
-  -e "FACTORY_PROJECT_ROOT=$PROJECT_ROOT" \
-  -e "FACTORY_ROLE=builder" \
-  -e "FACTORY_TICKET=$ISSUE" \
-  -e "FEATURE_NAME=$ISSUE" \
-  -e "BUILDER_ISSUE=$ISSUE"
-
-tmux send-keys -t "$ISSUE" "codex --dangerously-bypass-approvals-and-sandbox -m ${BUILDER_MODEL:-gpt-5.6-luna}" Enter
-
-# Bootstrap readiness: wait for the claude TUI to settle on first boot, then mark idle.
-# This one-time settle covers boot only; steady-state readiness is hook-driven (Stop=idle).
-sleep "${BUILDER_BOOT_SECONDS:-5}"
-KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR_SB/agent-state" "$ISSUE" idle
-
-# Deliver the first instruction through the delegator queue — never raw send-keys.
-KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR_SB/tmux-delegate" "$ISSUE" \
-  "Act as factory_builder for $ISSUE. The thin runtime record at $PROJECT_ROOT/kanban/$ISSUE.md links the only product truth for this work and its feature architecture. Read those linked files and relevant contracts/modules; do not read roadmap history and never edit docs/product/** or docs/architecture/**. Implement the observable outcomes, technical flow, failures, and event chains. After each useful commit, push feat/$ISSUE to origin for remote storage. Inspect structured correlated secret-safe logs during self-test. If an external value is required, never ask for it in chat. Declare its approved environment target and argv verifier with setup-contract; keep the verifier failure message brief and never include the value. The UI pipes the submitted value directly to the environment file and sends you only a field-available or verified event. If repeated module-specific setup or test steps occur, record them as reusable skill candidates in the AAR draft; the AAR is advisory and must not delay testing. Signal only: kanban-update $ISSUE READY_FOR_TESTING \"<summary>\". Pull-request creation and next dispatch are program-owned."
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR_SB/spawn-role" \
+  --role builder --session "$ISSUE" --ticket "$ISSUE" --cwd "$WORKTREE_PATH" \
+  --model "${BUILDER_MODEL:-gpt-5.6-luna}" \
+  --message "Build ticket $ISSUE. Read its context manifest and linked sources. Signal READY_FOR_TESTING only after committed code, observability, self-tests, and module documentation are pushed."
 
 KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR_SB/kanban-update" "$ISSUE" IN_PROGRESS "builder handoff acknowledged"
 

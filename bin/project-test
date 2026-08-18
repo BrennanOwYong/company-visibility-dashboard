@@ -12,6 +12,7 @@ KANBAN_PROJECT_ROOT="$ROOT/tests/fixtures/factory-project" "$ROOT/bin/roadmap-sy
 "$ROOT/tests/test-browser-evidence.sh"
 "$ROOT/tests/test-ui-user-tests.sh"
 "$ROOT/tests/test-event-driven-ui.sh"
+"$ROOT/tests/test-unified-worker-launcher.sh"
 "$ROOT/tests/test-test-contract.sh"
 "$ROOT/tests/test-candidate-launcher.sh"
 "$ROOT/tests/test-github-pr-flow.sh"

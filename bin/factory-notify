@@ -17,6 +17,6 @@ TMUX_TARGET="$TARGET"
 if [ "$TARGET" = coordinator ] && [ -s "$ROOT/.factory/runtime/coordinator" ]; then
   TMUX_TARGET=$(head -1 "$ROOT/.factory/runtime/coordinator")
 fi
-if tmux has-session -t "=$TMUX_TARGET" 2>/dev/null; then
+if tmux has-session -t "$TMUX_TARGET" 2>/dev/null; then
   KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/tmux-delegate" "$TMUX_TARGET" "$MESSAGE" || true
 fi

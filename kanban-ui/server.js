@@ -643,9 +643,24 @@ function parsePrdFeatures(text) {
 
 const FEATURE_ACCENTS = ['#6d28d9','#0891b2','#059669','#b45309','#be185d','#7c3aed'];
 
-// The single living PRD (knowledge/prd/product.md): one `## <slug>` section per feature
-// with **Why:** / **Goal:** / **User flow (numbered):** blocks. Non-feature sections
-// (Problem & users, Feature index, ledgers) are prose headings with spaces — skipped.
+function currentProductFeatures() {
+  const roadmapPath = path.join(PROJECT_ROOT, 'docs', 'architecture', 'roadmap.json');
+  if (!fs.existsSync(roadmapPath)) return [];
+  const roadmap = JSON.parse(fs.readFileSync(roadmapPath, 'utf8'));
+  const tickets = readTickets();
+  const section = (text, name) => ((text.match(new RegExp(`^## ${name}\\n([\\s\\S]*?)(?=^## |$)`, 'm')) || [])[1] || '').trim();
+  const steps = text => text.split('\n').map(line => line.trim()).filter(line => /^\d+\./.test(line)).map(line => line.replace(/^\d+\.\s*/, ''));
+  return (roadmap.features || []).map(feature => {
+    const doc = path.resolve(PROJECT_ROOT, feature.doc || '');
+    if (!doc.startsWith(path.resolve(PROJECT_ROOT, 'docs', 'product', 'features') + path.sep) || !fs.existsSync(doc)) return null;
+    const text = fs.readFileSync(doc, 'utf8');
+    return { name: feature.id, title: feature.title, desc: [section(text, 'Purpose'), section(text, 'User outcome')].filter(Boolean).join(' '),
+      why: section(text, 'Purpose'), goal: section(text, 'User outcome'), flow: steps(section(text, 'Positive flow')),
+      edges: steps(section(text, 'Negative and recovery flow')), issues: tickets.filter(t => t.feature === feature.id).map(t => t.issue) };
+  }).filter(Boolean);
+}
+
+// Legacy parser retained only for old delivery snapshots. Active product pages use currentProductFeatures.
 function parseProductPrd(text, issuesByFeature) {
   const features = [];
   for (const sec of text.split(/\n## /).slice(1)) {
@@ -669,8 +684,6 @@ function parseProductPrd(text, issuesByFeature) {
 }
 
 function renderPrdPage() {
-  const productPath = path.join(KNOWLEDGE_DIR, 'prd', 'product.md');
-  const prdPath = path.join(KNOWLEDGE_DIR, 'user-flow.md');   // legacy coordinator flow
   const projectName = path.basename(PROJECT_ROOT);
 
   const noDataPage = (msg) => `<!DOCTYPE html>
@@ -684,28 +697,10 @@ code{background:#161b27;border:1px solid #1e2433;padding:2px 6px;border-radius:3
 <header><a class="back" href="/">← Board</a></header>
 <div class="msg">${msg}</div></body></html>`;
 
-  let title, intro, features;
-  if (fs.existsSync(productPath)) {
-    const raw = fs.readFileSync(productPath, 'utf8');
-    title = (raw.match(/^# (.+)$/m) || [null, projectName])[1].trim();
-    intro = ((raw.match(/## Problem & users\n([\s\S]*?)(?=\n## )/) || [null, ''])[1] || '').trim();
-    const issuesByFeature = {};
-    for (const t of readTickets()) {
-      if (t.feature) (issuesByFeature[t.feature] = issuesByFeature[t.feature] || []).push(t.issue);
-    }
-    features = parseProductPrd(raw, issuesByFeature);
-    if (!features.length) return noDataPage('product.md exists but has no feature sections (expected <code>## feature-slug</code> headings).');
-  } else if (fs.existsSync(prdPath)) {
-    const raw = fs.readFileSync(prdPath, 'utf8');
-    const titleMatch = raw.match(/^# (.+)$/m);
-    title = titleMatch ? titleMatch[1].trim() : projectName;
-    const introMatch = raw.match(/^# .+\n+([\s\S]*?)(?=\n###|$)/);
-    intro = introMatch ? introMatch[1].trim() : '';
-    features = parsePrdFeatures(raw);
-    if (!features.length) return noDataPage('PRD exists but contains no feature sections (expected <code>### feature-name</code> headings).');
-  } else {
-    return noDataPage(`No PRD found at <code>knowledge/prd/product.md</code>. The PM (prd-agent) writes it during requirements capture.`);
-  }
+  const title = projectName;
+  const intro = 'Current features from docs/product. The technical order comes from docs/architecture/roadmap.json.';
+  const features = currentProductFeatures();
+  if (!features.length) return noDataPage('No active feature documents are linked by <code>docs/architecture/roadmap.json</code>.');
 
   const featureCards = features.map((f, i) => {
     const accent = FEATURE_ACCENTS[i % FEATURE_ACCENTS.length];
@@ -1133,7 +1128,6 @@ pre{padding:11px 13px;overflow-x:auto;margin:8px 0}code{padding:2px 5px}
 // ── Checklist page: product coverage — every feature and flow vs its tickets ──
 function renderChecklistPage() {
   const projectName = path.basename(PROJECT_ROOT);
-  const productPath = path.join(KNOWLEDGE_DIR, 'prd', 'product.md');
   const shell = (body) => `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Checklist — ${esc(projectName)}</title>
 ${LIVE_SCRIPT}
@@ -1172,12 +1166,9 @@ code{background:#161b27;border:1px solid #1e2433;padding:2px 6px;border-radius:3
 <div><div class="hdr-title">Product checklist</div><div class="hdr-sub">${esc(projectName)} — every feature you asked for, and where it stands</div></div></header>
 ${body}</body></html>`;
 
-  if (!fs.existsSync(productPath))
-    return shell(`<div class="msg">No PRD found at <code>knowledge/prd/product.md</code> — nothing to check off yet.</div>`);
-  const raw = fs.readFileSync(productPath, 'utf8');
-  const features = parseProductPrd(raw, {});
+  const features = currentProductFeatures();
   if (!features.length)
-    return shell(`<div class="msg">product.md has no feature sections (expected <code>## feature-slug</code> headings).</div>`);
+    return shell(`<div class="msg">No active feature documents are linked by <code>docs/architecture/roadmap.json</code>.</div>`);
 
   const tickets = readTickets();
   const isDone = t => t.status === 'DONE' || t.status === 'COMPLETE';

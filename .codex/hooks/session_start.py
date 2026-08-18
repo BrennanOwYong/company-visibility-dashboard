@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tomllib
 from pathlib import Path
 
 
@@ -43,16 +44,32 @@ def ensure_layout(root: Path) -> None:
         (root / directory).mkdir(parents=True, exist_ok=True)
 
 
+def worker_context(root: Path, role: str, ticket: str, project_root: str) -> str:
+    role_file = Path(project_root) / ".codex" / "agents" / f"factory-{role}.toml"
+    instructions = ""
+    if role_file.is_file():
+        instructions = tomllib.loads(role_file.read_text(encoding="utf-8")).get(
+            "developer_instructions", ""
+        ).strip()
+    manifest_path = Path(project_root) / ".factory" / "runtime" / "contexts" / (
+        os.environ.get("FACTORY_AGENT", "") + ".json"
+    )
+    manifest = ""
+    if manifest_path.is_file():
+        manifest = manifest_path.read_text(encoding="utf-8").strip()
+    return (
+        f"FACTORY WORKER role={role} ticket={ticket}. Canonical project root: {project_root}. "
+        "Do not initialize a factory or act as the coordinator. "
+        f"ROLE RULES:\n{instructions}\nTICKET CONTEXT:\n{manifest}"
+    )
+
+
 def startup_context(root: Path) -> str:
     role = os.environ.get("FACTORY_ROLE", "")
     ticket = os.environ.get("FACTORY_TICKET", "")
     project_root = os.environ.get("FACTORY_PROJECT_ROOT", "")
     if role:
-        return (
-            f"FACTORY WORKER role={role} ticket={ticket}. Canonical project root: {project_root}. "
-            "Do not initialize a factory, ask for a GitHub URL, create a roadmap, or act as the "
-            "coordinator. Read only the linked product feature and relevant technical documents."
-        )
+        return worker_context(root, role, ticket, project_root or str(root))
     config = root / ".factory/project.json"
     if not config.exists():
         return (
@@ -98,6 +115,15 @@ def ensure_ui(root: Path) -> str:
 
 def main() -> None:
     root = git_root()
+    role = os.environ.get("FACTORY_ROLE", "")
+    agent = os.environ.get("FACTORY_AGENT", "")
+    project_root = Path(os.environ.get("FACTORY_PROJECT_ROOT", str(root)))
+    if role and agent:
+        state = project_root / ".factory" / "runtime" / "agents" / f"{agent}.state"
+        ready = project_root / ".factory" / "runtime" / "agents" / f"{agent}.ready"
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text("idle\n", encoding="utf-8")
+        ready.write_text("ready\n", encoding="utf-8")
     if not os.environ.get("FACTORY_ROLE"):
         ensure_layout(root)
         register_coordinator(root)

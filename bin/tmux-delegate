@@ -15,8 +15,8 @@ if [ -z "$ROOT" ] || [ -z "$AGENT" ] || [ -z "$MSG" ]; then
 fi
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
-mkdir -p "$ROOT/kanban/inbox" "$ROOT/kanban/agents"
-INBOX="$ROOT/kanban/inbox/$AGENT.jsonl"
+mkdir -p "$ROOT/.factory/runtime/inbox" "$ROOT/.factory/runtime/agents"
+INBOX="$ROOT/.factory/runtime/inbox/$AGENT.jsonl"
 TS=$(date +%s%3N 2>/dev/null || echo 0)
 
 LINE=$(python3 -c "import json,sys; print(json.dumps({'ts': int(sys.argv[1]), 'msg': sys.argv[2]}))" "$TS" "$MSG" 2>/dev/null)

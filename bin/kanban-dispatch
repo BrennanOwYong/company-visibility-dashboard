@@ -17,7 +17,7 @@
 #   kanban-dispatch            dispatch every NOT_STARTED, not-yet-spawned issue
 #   kanban-dispatch --dry-run  show what would be dispatched, spawn nothing
 #   kanban-dispatch --force    re-spawn even issues that already have a worktree
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
@@ -68,7 +68,7 @@ edge_satisfied() {   # edge_satisfied <issue> <dep> — the dependency must be D
   local dep_file="$KANBAN_DIR/$2.md"
   if [ ! -f "$dep_file" ]; then
     echo "  ⚠ $1 — prerequisite '$2' has no ticket; roadmap-sync must be repaired" >&2
-    return 0
+    return 1
   fi
   [ "$(grep -m1 '^status:' "$dep_file" | awk '{print $2}')" = "DONE" ]
 }
