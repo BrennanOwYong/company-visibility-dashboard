@@ -25,6 +25,8 @@ function request(path, options = {}) {
   assert.deepEqual(data.entries.map(entry => entry.id), ['connected-tools', 'memory', 'create-page']);
   const page = await request('/api/v1/pages/memory', { headers: { 'X-Interaction-ID': 'page-interaction' } }); assert.equal(page.status, 200);
   const unavailablePage = await request('/api/v1/pages/unavailable', { headers: { 'X-Interaction-ID': 'failed-page-interaction' } }); assert.equal(unavailablePage.status, 503);
+  const shellRoute = await request('/pages/evaluation-page?fixture=page'); assert.equal(shellRoute.status, 200); assert.match(shellRoute.body, /Company dashboard/);
+  const evaluationNavigation = await request('/api/v1/navigation?fixture=page'); assert.equal(evaluationNavigation.status, 200); assert.equal(JSON.parse(evaluationNavigation.body).entries.at(-1).id, 'evaluation-page');
   const failure = await request('/api/v1/navigation?fail=1'); assert.equal(failure.status, 503); assert.match(failure.body, /temporarily unavailable/);
   const telemetry = await request('/api/v1/telemetry', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ name:'ui.user_action', interaction_id:'test-interaction', route:'/memory', secret:'must-not-log' }) }); assert.equal(telemetry.status, 202);
   await new Promise(resolve => setTimeout(resolve, 25));

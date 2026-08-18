@@ -27,8 +27,10 @@ const fixedEntries = [
   { id: 'create-page', kind: 'fixed', title: 'Create page', icon_key: 'plus', route: '/pages/new' }
 ];
 
-function navigation(url) {
-  const fixture = url.searchParams.get('fixture') || process.env.DASHBOARD_FIXTURE || 'empty';
+function navigation(url, request) {
+  let refererPath = '';
+  try { refererPath = new URL(request.headers.referer || '').pathname; } catch {}
+  const fixture = url.searchParams.get('fixture') || process.env.DASHBOARD_FIXTURE || (refererPath === '/pages/evaluation-page' ? 'page' : 'empty');
   if (fixture === 'failure' || url.searchParams.get('fail') === '1') {
     const error = new Error('navigation unavailable');
     error.code = 'temporary_failure';
@@ -76,7 +78,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && url.pathname === '/health') return sendJson(res, 200, { status: 'ok' }, requestId);
   if (req.method === 'GET' && url.pathname === '/api/v1/navigation') {
     try {
-      const result = navigation(url);
+      const result = navigation(url, req);
       logEvent('api.request.completed', { request_id: requestId, safe_attributes: { route: '/api/v1/navigation', count: result.entries.length } });
       return sendJson(res, 200, result, requestId);
     } catch (error) {
@@ -105,6 +107,7 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === 'GET' && url.pathname.startsWith('/api/v1/pages/')) return routePage(res, url.pathname.replace('/api/v1/pages', '') || '/', requestId, req.headers['x-interaction-id']);
   if (req.method === 'GET' && url.pathname === '/') return serveFile(res, 'public/index.html', 'text/html; charset=utf-8');
+  if (req.method === 'GET' && ['/connected-tools', '/memory', '/pages/new', '/pages/evaluation-page'].includes(url.pathname)) return serveFile(res, 'public/index.html', 'text/html; charset=utf-8');
   if (req.method === 'GET' && url.pathname === '/app.js') return serveFile(res, 'public/app.js', 'text/javascript; charset=utf-8');
   if (req.method === 'GET' && url.pathname === '/styles.css') return serveFile(res, 'public/styles.css', 'text/css; charset=utf-8');
   res.writeHead(404); res.end('Not found');

@@ -15,16 +15,19 @@
     state.innerHTML = `<section class="page-card" aria-labelledby="page-title"><p class="eyebrow">${view === 'empty' ? 'Welcome' : 'Workspace'}</p><h1 id="page-title">${entry.title}</h1><p>${extra.message || (entry.id === 'create-page' ? 'Describe the company page you want to create. We will help you shape it and save it here.' : entry.id === 'connected-tools' ? 'Connect the tools that contain the information your company needs.' : entry.id === 'memory' ? 'Review your organization Memory and its current summary.' : 'Your saved company page is ready to explore.')}</p>${view === 'empty' ? '<a class="empty-action" href="/pages/new" data-route="/pages/new">Create your first page</a>' : ''}${view === 'error' ? '<button class="retry" type="button" data-retry="">Retry</button>' : ''}</section>`;
     emit('ui.page_state.rendered', { route: entry.route, state: view, entry_kind: entry.kind });
     state.querySelector('[data-route]')?.addEventListener('click', (event) => { event.preventDefault(); select(entries.find(item => item.route === '/pages/new')); });
-    state.querySelector('[data-retry]')?.addEventListener('click', () => select(entry));
+    state.querySelector('[data-retry]')?.addEventListener('click', () => select(entry, { recovery: true }));
   };
   const drawMenu = () => { list.innerHTML = entries.map(entry => `<button class="nav-item ${entry.kind === 'fixed' && entry.id === 'create-page' ? 'plus' : ''}" type="button" data-id="${entry.id}" aria-current="false"><span class="nav-icon" aria-hidden="true">${icons[entry.icon_key] || '•'}</span><span>${entry.title}</span></button>`).join(''); list.querySelectorAll('.nav-item').forEach(button => button.addEventListener('click', () => select(entries.find(entry => entry.id === button.dataset.id)))); };
   const markSelected = (entry) => list.querySelectorAll('.nav-item').forEach(button => button.setAttribute('aria-current', button.dataset.id === entry.id ? 'page' : 'false'));
-  const select = async (entry) => {
+  const select = async (entry, options = {}) => {
     if (!entry) return;
-    interactionId = crypto.randomUUID();
+    if (!options.recovery) interactionId = crypto.randomUUID();
     if (location.pathname !== entry.route) history.pushState({}, '', entry.route);
-    emit('ui.user_action', { route: entry.route, entry_kind: entry.kind });
-    emit('ui.navigation.selected', { route: entry.route, entry_kind: entry.kind });
+    if (options.recovery) emit('ui.recovery.selected', { route: entry.route, entry_kind: entry.kind });
+    else {
+      emit('ui.user_action', { route: entry.route, entry_kind: entry.kind });
+      emit('ui.navigation.selected', { route: entry.route, entry_kind: entry.kind });
+    }
     markSelected(entry); state.innerHTML = '<section class="page-card"><p class="status">Loading destination…</p></section>';
     const started = performance.now();
     try {
