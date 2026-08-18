@@ -32,22 +32,8 @@ if [ -d "$PROJECT_ROOT/.codex/agents" ] && [ ! -f "$PROJECT_ROOT/.codex/agents/$
   exit 1
 fi
 
-if ! tmux has-session -t "$AGENT" 2>/dev/null; then
-  # Research/Task subagents run Sonnet regardless of the user-level subagent-model
-  # setting (which would force a frontier model onto every fan-out).
-  tmux new-session -d -s "$AGENT" -c "$PROJECT_ROOT" \
-    -e "PATH=$PROJECT_ROOT/bin:$PATH" \
-    -e "KANBAN_PROJECT_ROOT=$PROJECT_ROOT" \
-    -e "FACTORY_AGENT=$AGENT"
-  tmux send-keys -t "$AGENT" "codex --dangerously-bypass-approvals-and-sandbox -m ${FACTORY_PLANNING_MODEL:-gpt-5.6-sol}" Enter
-  # The idle mark IS the delivery gate (inbox-drain only delivers to idle sessions), so it
-  # must wait for the TUI to actually be input-ready — a fixed sleep raced cold boots and let
-  # messages be typed into a half-started session, where they were silently swallowed.
-  BOOT_DEADLINE=$(( $(date +%s) + ${AGENT_BOOT_SECONDS:-90} ))
-  sleep 1
-  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/agent-state" "$AGENT" idle
-  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/factory-log" agent_spawned agent="$AGENT"
-fi
+ROLE="${AGENT#factory-}"
+case "$ROLE" in builder|tester|web-tester|planner|product) ;; *) ROLE=planner;; esac
 
 if [ -n "$MSG" ]; then
   # Port-on-boot (shift-left): a VALIDATE kickoff is the moment the ticket's test port
@@ -59,7 +45,10 @@ if [ -n "$MSG" ]; then
     VPORT=$(KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/kanban-port" "$VISSUE") \
       && echo "[$VISSUE] test port: $VPORT"
   fi
-  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/tmux-delegate" "$AGENT" "$MSG"
 fi
+
+KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$SCRIPT_DIR/spawn-role" \
+  --role "$ROLE" --session "$AGENT" --cwd "$PROJECT_ROOT" \
+  --model "${FACTORY_PLANNING_MODEL:-gpt-5.6-sol}" --message "$MSG"
 
 echo "Agent session: $AGENT  (tmux attach -t $AGENT)"

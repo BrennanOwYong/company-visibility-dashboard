@@ -1,0 +1,43 @@
+#!/bin/bash
+# Start one Codex worker and deliver work only after its SessionStart hook reports readiness.
+set -euo pipefail
+ROLE=""; SESSION=""; TICKET=""; CWD=""; MODEL=""; MESSAGE=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --role) ROLE="$2"; shift 2;; --session) SESSION="$2"; shift 2;;
+    --ticket) TICKET="$2"; shift 2;; --cwd) CWD="$2"; shift 2;;
+    --model) MODEL="$2"; shift 2;; --message) MESSAGE="$2"; shift 2;;
+    *) echo "Unknown argument: $1" >&2; exit 2;;
+  esac
+done
+ROOT="${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+[ -n "$ROLE" ] && [ -n "$SESSION" ] && [ -n "$CWD" ] || { echo "Usage: spawn-role --role <role> --session <name> --cwd <path>" >&2; exit 2; }
+case "$ROLE" in builder|tester|web-tester|planner|product) ;; *) echo "Unsupported role: $ROLE" >&2; exit 2;; esac
+[ -d "$CWD" ] || { echo "Worker directory does not exist: $CWD" >&2; exit 2; }
+case "$ROLE" in builder|web-tester) DEFAULT_MODEL=gpt-5.6-luna;; tester) DEFAULT_MODEL=gpt-5.6-terra;; *) DEFAULT_MODEL=gpt-5.6-sol;; esac
+MODEL="${MODEL:-$DEFAULT_MODEL}"; RUNTIME="$ROOT/.factory/runtime"
+mkdir -p "$RUNTIME/agents" "$RUNTIME/contexts"; READY="$RUNTIME/agents/$SESSION.ready"
+python3 - "$RUNTIME/contexts/$SESSION.json" "$ROLE" "$SESSION" "$TICKET" "$CWD" <<'PY'
+import json, os, sys
+path, role, session, ticket, cwd = sys.argv[1:]
+data={"schema_version":1,"role":role,"session":session,"ticket":ticket,"working_directory":cwd,
+      "feature_doc":f"docs/product/features/{ticket}.md" if ticket else "",
+      "architecture_doc":f"docs/architecture/features/{ticket}.md" if ticket else ""}
+tmp=path+".tmp"
+with open(tmp,"w",encoding="utf-8") as f: json.dump(data,f,indent=2); f.write("\n")
+os.replace(tmp,path)
+PY
+if ! tmux has-session -t "=$SESSION" 2>/dev/null; then
+  rm -f "$READY"
+  tmux new-session -d -s "$SESSION" -c "$CWD" -e "PATH=$ROOT/bin:$PATH" \
+    -e "KANBAN_PROJECT_ROOT=$ROOT" -e "FACTORY_PROJECT_ROOT=$ROOT" \
+    -e "FACTORY_AGENT=$SESSION" -e "FACTORY_ROLE=$ROLE" -e "FACTORY_TICKET=$TICKET"
+  tmux send-keys -t "=$SESSION" -l -- "codex --dangerously-bypass-approvals-and-sandbox -m $MODEL"
+  tmux send-keys -t "=$SESSION" Enter
+  deadline=$(( $(date +%s) + ${AGENT_BOOT_SECONDS:-90} ))
+  while [ ! -f "$READY" ] && [ "$(date +%s)" -lt "$deadline" ]; do sleep 1; done
+  [ -f "$READY" ] || { echo "Worker $SESSION did not report readiness within ${AGENT_BOOT_SECONDS:-90} seconds." >&2; exit 1; }
+  KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/factory-log" agent_spawned agent="$SESSION" role="$ROLE" ticket="$TICKET" 2>/dev/null || true
+fi
+[ -z "$MESSAGE" ] || KANBAN_PROJECT_ROOT="$ROOT" "$ROOT/bin/tmux-delegate" "$SESSION" "$MESSAGE"
+echo "Worker session: $SESSION (role $ROLE${TICKET:+, ticket $TICKET})"

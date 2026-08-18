@@ -11,8 +11,8 @@ if [ -z "$ROOT" ] || [ -z "$AGENT" ]; then
   exit 0
 fi
 
-STATE_FILE="$ROOT/kanban/agents/$AGENT.state"
-INBOX="$ROOT/kanban/inbox/$AGENT.jsonl"
+STATE_FILE="$ROOT/.factory/runtime/agents/$AGENT.state"
+INBOX="$ROOT/.factory/runtime/inbox/$AGENT.jsonl"
 
 [ -s "$INBOX" ] || exit 0
 

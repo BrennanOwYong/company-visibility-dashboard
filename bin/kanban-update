@@ -67,6 +67,7 @@ if [ "$STATUS" = "RUNNING_TESTS" ]; then
   grep -qE '^candidate_commit: [0-9a-f]{40}$' "$KANBAN_FILE" || {
     echo "[$ISSUE] REFUSED RUNNING_TESTS: pre-test rebase did not record candidate_commit"; exit 1;
   }
+  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$PROJECT_ROOT/bin/spawn-validator" "$ISSUE"
 fi
 
 # VALIDATED (validator → route). Not a stored state — a signal the validator sends on a passing
@@ -136,11 +137,6 @@ KANBAN_PROJECT_ROOT="$PROJECT_ROOT" "$PROJECT_ROOT/bin/roadmap-sync" --root "$PR
 # On RUNNING_TESTS the KANBAN spawns (first round) or messages (later rounds) the ticket's own
 # persistent validator session — the builder never does. spawn-validator allocates the test port
 # on boot and delivers the VALIDATE kickoff.
-if [ "$STATUS" = "RUNNING_TESTS" ]; then
-  KANBAN_PROJECT_ROOT="$PROJECT_ROOT" spawn-validator "$ISSUE" \
-    || echo "[$ISSUE] WARNING: spawn-validator failed; re-run: spawn-validator $ISSUE"
-fi
-
 # Only user-test tickets reach NEEDS_USER_TESTING (non-user-test integrated to DONE above).
 # The port is already allocated (validator boot); confirm it and notify the coordinator that the
 # human's Test step is ready. No card is generated — the board's Test button is the setup surface.

@@ -9,7 +9,7 @@
 set -e
 
 ISSUE="$1"
-PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(cat "$HOME/.claude/.coordinator-root" 2>/dev/null || pwd)}"
+PROJECT_ROOT="${KANBAN_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 KANBAN_FILE="$PROJECT_ROOT/kanban/$ISSUE.md"
 
 if [ -z "$ISSUE" ]; then

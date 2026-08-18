@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "routes": {
+    "page-code-demo": {
+      "kind": "fixture-sidecar",
+      "enabled": true,
+      "output": "page-definition-v1",
+      "visible_delay_ms": 1800
+    },
+    "page-code-glm": {
+      "kind": "claude-code-sidecar",
+      "enabled": false,
+      "command": ["claude", "--print", "--output-format", "json"],
+      "provider": "z-ai-anthropic-compatible",
+      "model_environment": "ANTHROPIC_DEFAULT_SONNET_MODEL",
+      "required_environment": ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"],
+      "output": "page-definition-v1",
+      "scope": "one-page"
+    }
+  }
+}

@@ -29,6 +29,16 @@ whether requested information is available. The user sees the resolved request b
 Confirmation pins conversation, request, Memory, and capability versions. The build job uses the
 constrained agent contract and can publish only after deterministic validation.
 
+The first evaluation uses a `demo` page-code route. This route runs as a background sidecar process,
+records queued and building states, waits for the configured demonstration interval, and returns a
+reviewed pre-generated page definition. It never starts Claude Code and never represents the result
+as model-generated. The durable job and publication contracts remain the same.
+
+The later `glm-claude-code` route starts Claude Code as a separate sidecar process. It supplies one
+page request, a constrained output directory, the approved page schema, and the current safe tool
+and Memory context. The route uses the Z.AI Anthropic-compatible endpoint. The sidecar receives the
+credential through its process environment. The prompt and logs never contain the credential.
+
 ## Inputs, outputs, and contracts
 
 - Input: plus selection, suggestion key or redacted natural-language message, and clarification
@@ -98,6 +108,7 @@ definition text.
 | DC-06 | Feasible request proves durable progress and either validated publication or explicit failure |
 | DC-07 | Browser close/reload and worker interruption prove conversation/request/build recovery |
 | DC-08 | Secret-in-chat fixtures prove redaction before storage/model input and Connected Tools route |
+| DC-09 | Demonstration fixture proves queued/building/published order, explicit preview label, one generated route, and reload persistence |
 
 The tester asserts the full precursor event chain for DC-06, not only the final published screen.
 
@@ -105,7 +116,8 @@ The tester asserts the full precursor event chain for DC-06, not only the final 
 
 - Suggestion text is product-owned content; its technical template cannot define unresolved retention
   or real-time meaning.
-- Model provider, build budget, timeout, approval boundary, and multi-user editing remain open.
+- Build budget, timeout, approval boundary, and multi-user editing remain open. The future coding
+  route uses `glm-claude-code`; the evaluation route uses `demo` and needs no model credential.
 - Page-definition schema and model policy versions are included in the release artifact.
 - Staging must run success, blocked, secret, invalid output, timeout, retry, and browser reconnect
   journeys before production.

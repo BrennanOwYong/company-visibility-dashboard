@@ -23,6 +23,11 @@ The required suggestions include user retention across posting platforms in real
 count over time. Their exact product meanings remain open. This feature does not pretend that an
 unsupported source or unavailable measure can be connected. It does not store credentials in chat.
 
+For the first evaluation, the build runs in demonstration mode. The product waits for a short,
+visible background-build interval and then publishes one pre-generated example page. It labels the
+result as demonstration data. It does not claim that an agent or live provider created the page.
+The saved request and route use the same durable interfaces that the later coding sidecar will use.
+
 ## Positive flow
 
 1. The user selects the plus button. A chat opens with a helpful message that explains that
@@ -39,6 +44,8 @@ unsupported source or unavailable measure can be connected. It does not store cr
    the real connected page.
 7. Creation succeeds. The user sees the new page name, its purpose, and a direct route to the saved
    page in the side menu.
+8. In demonstration mode, the user sees that the build is a preview. After the visible build state,
+   the pre-generated page appears and remains available after a reload.
 
 ## Negative and recovery flow
 
@@ -87,6 +94,9 @@ unsupported source or unavailable measure can be connected. It does not store cr
   conversation and current request remain available to resume.
 - **DC-08:** Given secret text is supplied in chat, when it is handled, then it is not included in
   the ordinary saved conversation summary and the user is directed to Connected Tools.
+- **DC-09:** Given demonstration mode is active, when the user confirms one page request, then the
+  build changes through queued and building states before it publishes one labeled pre-generated
+  page at a new route. A reload retains the page and its original request.
 
 ## Subjective user-test questions
 
@@ -107,4 +117,3 @@ unsupported source or unavailable measure can be connected. It does not store cr
   existing page?
 - Can several users join or edit one page-building conversation?
 - What build duration should be considered acceptable before the product offers another action?
-

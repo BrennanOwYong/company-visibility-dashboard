@@ -75,8 +75,7 @@
       "doc": "docs/product/features/page-builder-chat.md",
       "architecture": "docs/architecture/features/page-builder-chat.md",
       "depends_on": [
-        "connected-social-tools",
-        "company-memory"
+        "dashboard-shell"
       ],
       "subjective_ux": true,
       "needs_infra": [],

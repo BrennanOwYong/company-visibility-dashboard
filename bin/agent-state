@@ -11,5 +11,7 @@ if [ -z "$ROOT" ] || [ -z "$AGENT" ] || [ -z "$STATE" ]; then
   exit 0
 fi
 
-mkdir -p "$ROOT/kanban/agents"
-printf '%s\n' "$STATE" > "$ROOT/kanban/agents/$AGENT.state"
+mkdir -p "$ROOT/.factory/runtime/agents"
+TMP="$ROOT/.factory/runtime/agents/$AGENT.state.$$"
+printf '%s\n' "$STATE" > "$TMP"
+mv "$TMP" "$ROOT/.factory/runtime/agents/$AGENT.state"
