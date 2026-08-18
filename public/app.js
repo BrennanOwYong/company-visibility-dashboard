@@ -46,7 +46,8 @@
   const load = async () => {
     emit('ui.shell.loaded', { route:'/', state:'loading' });
     try {
-      const response = await fetch(`/api/v1/navigation${location.search}`);
+      const navigationQuery = location.search || (location.pathname === '/pages/evaluation-page' ? '?fixture=page' : '');
+      const response = await fetch(`/api/v1/navigation${navigationQuery}`);
       if (!response.ok) throw new Error('temporary_failure');
       const data = await response.json(); entries = data.entries; drawMenu();
       emit('api.request.completed', { route:'/api/v1/navigation', count:entries.length });
