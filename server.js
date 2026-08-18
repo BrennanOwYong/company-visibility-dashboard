@@ -26,6 +26,7 @@ const fixedEntries = [
   { id: 'memory', kind: 'fixed', title: 'Memory', icon_key: 'spark', route: '/memory' },
   { id: 'create-page', kind: 'fixed', title: 'Create page', icon_key: 'plus', route: '/pages/new' }
 ];
+const pageRoutes = new Set(fixedEntries.map(entry => entry.route).concat('/pages/evaluation-page'));
 
 function navigation(url, request) {
   let refererPath = '';
@@ -46,15 +47,21 @@ function sendJson(res, status, body, requestId) {
 }
 
 function routePage(res, route, requestId, interactionId) {
-  const unavailable = route.includes('unavailable') || route.includes('fail');
+  const namedFailure = route.includes('unavailable') || route.includes('fail');
+  const unknown = !pageRoutes.has(route) && !namedFailure;
+  const forcedUnavailable = namedFailure || (process.env.DASHBOARD_FIXTURE === 'page-failure' && !unknown);
+  const unavailable = unknown || forcedUnavailable;
   if (unavailable) {
     logEvent('api.request.failed', {
       request_id: requestId,
       interaction_id: interactionId,
       outcome: 'failed',
-      safe_attributes: { route: '/api/v1/pages/:page_route', error_class: 'temporary_failure' }
+      safe_attributes: { route: '/api/v1/pages/:page_route', error_class: unknown ? 'not_found' : 'temporary_failure' }
     });
-    sendJson(res, 503, { error: { code: 'temporary_failure', message: 'This page is temporarily unavailable.', recovery: 'retry', request_id: requestId } }, requestId);
+    const error = unknown
+      ? { code: 'not_found', message: 'The requested page is not available.', recovery: 'choose_another', request_id: requestId }
+      : { code: 'temporary_failure', message: 'This page is temporarily unavailable.', recovery: 'retry', request_id: requestId };
+    sendJson(res, unknown ? 404 : 503, { error }, requestId);
     return;
   }
   logEvent('api.request.completed', {

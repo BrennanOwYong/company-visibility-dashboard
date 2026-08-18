@@ -25,6 +25,7 @@ function request(path, options = {}) {
   assert.deepEqual(data.entries.map(entry => entry.id), ['connected-tools', 'memory', 'create-page']);
   const page = await request('/api/v1/pages/memory', { headers: { 'X-Interaction-ID': 'page-interaction' } }); assert.equal(page.status, 200);
   const unavailablePage = await request('/api/v1/pages/unavailable', { headers: { 'X-Interaction-ID': 'failed-page-interaction' } }); assert.equal(unavailablePage.status, 503);
+  const unknownPage = await request('/api/v1/pages/not-a-real-page', { headers: { 'X-Interaction-ID': 'unknown-page-interaction' } }); assert.equal(unknownPage.status, 404); assert.equal(JSON.parse(unknownPage.body).error.code, 'not_found');
   const shellRoute = await request('/pages/evaluation-page?fixture=page'); assert.equal(shellRoute.status, 200); assert.match(shellRoute.body, /Company dashboard/);
   const evaluationNavigation = await request('/api/v1/navigation?fixture=page'); assert.equal(evaluationNavigation.status, 200); assert.equal(JSON.parse(evaluationNavigation.body).entries.at(-1).id, 'evaluation-page');
   const failure = await request('/api/v1/navigation?fail=1'); assert.equal(failure.status, 503); assert.match(failure.body, /temporarily unavailable/);
