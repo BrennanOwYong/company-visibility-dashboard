@@ -28,7 +28,7 @@
     markSelected(entry); state.innerHTML = '<section class="page-card"><p class="status">Loading destination…</p></section>';
     const started = performance.now();
     try {
-      const response = await fetch(`/api/v1/pages${entry.route}`);
+      const response = await fetch(`/api/v1/pages${entry.route}`, { headers: { 'X-Interaction-ID': interactionId } });
       if (!response.ok) throw new Error('temporary_failure');
       await response.json();
       emit('api.request.completed', { route: `/api/v1/pages${entry.route}`, duration: Math.round(performance.now() - started) });

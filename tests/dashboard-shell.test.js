@@ -23,10 +23,13 @@ function request(path, options = {}) {
   const health = await request('/health'); assert.equal(health.status, 200);
   const navigation = await request('/api/v1/navigation'); const data = JSON.parse(navigation.body);
   assert.deepEqual(data.entries.map(entry => entry.id), ['connected-tools', 'memory', 'create-page']);
-  const page = await request('/api/v1/pages/memory'); assert.equal(page.status, 200);
+  const page = await request('/api/v1/pages/memory', { headers: { 'X-Interaction-ID': 'page-interaction' } }); assert.equal(page.status, 200);
+  const unavailablePage = await request('/api/v1/pages/unavailable', { headers: { 'X-Interaction-ID': 'failed-page-interaction' } }); assert.equal(unavailablePage.status, 503);
   const failure = await request('/api/v1/navigation?fail=1'); assert.equal(failure.status, 503); assert.match(failure.body, /temporarily unavailable/);
   const telemetry = await request('/api/v1/telemetry', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ name:'ui.user_action', interaction_id:'test-interaction', route:'/memory', secret:'must-not-log' }) }); assert.equal(telemetry.status, 202);
   await new Promise(resolve => setTimeout(resolve, 25));
   assert.match(output, /"name":"api\.request\.completed"/); assert.match(output, /"name":"api\.request\.failed"/); assert(!output.includes('must-not-log'));
+  assert.match(output, /"name":"api\.request\.completed".*"interaction_id":"page-interaction"/);
+  assert.match(output, /"name":"api\.request\.failed".*"interaction_id":"failed-page-interaction"/);
   child.kill('SIGTERM'); console.log('dashboard shell checks: PASS');
 })().catch(error => { child.kill('SIGTERM'); console.error(error.stack); process.exitCode = 1; });

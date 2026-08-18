@@ -43,12 +43,23 @@ function sendJson(res, status, body, requestId) {
   res.end(JSON.stringify(body));
 }
 
-function routePage(res, route, requestId) {
+function routePage(res, route, requestId, interactionId) {
   const unavailable = route.includes('unavailable') || route.includes('fail');
   if (unavailable) {
+    logEvent('api.request.failed', {
+      request_id: requestId,
+      interaction_id: interactionId,
+      outcome: 'failed',
+      safe_attributes: { route: '/api/v1/pages/:page_route', error_class: 'temporary_failure' }
+    });
     sendJson(res, 503, { error: { code: 'temporary_failure', message: 'This page is temporarily unavailable.', recovery: 'retry', request_id: requestId } }, requestId);
     return;
   }
+  logEvent('api.request.completed', {
+    request_id: requestId,
+    interaction_id: interactionId,
+    safe_attributes: { route: '/api/v1/pages/:page_route' }
+  });
   sendJson(res, 200, { page: { route, title: route === '/pages/new' ? 'Create a page' : route === '/memory' ? 'Memory' : route === '/connected-tools' ? 'Connected Tools' : 'Revenue overview' }, version: 1 }, requestId);
 }
 
@@ -92,7 +103,7 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
-  if (req.method === 'GET' && url.pathname.startsWith('/api/v1/pages/')) return routePage(res, url.pathname.replace('/api/v1/pages', '') || '/', requestId);
+  if (req.method === 'GET' && url.pathname.startsWith('/api/v1/pages/')) return routePage(res, url.pathname.replace('/api/v1/pages', '') || '/', requestId, req.headers['x-interaction-id']);
   if (req.method === 'GET' && url.pathname === '/') return serveFile(res, 'public/index.html', 'text/html; charset=utf-8');
   if (req.method === 'GET' && url.pathname === '/app.js') return serveFile(res, 'public/app.js', 'text/javascript; charset=utf-8');
   if (req.method === 'GET' && url.pathname === '/styles.css') return serveFile(res, 'public/styles.css', 'text/css; charset=utf-8');

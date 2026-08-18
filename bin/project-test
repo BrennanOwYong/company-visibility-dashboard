@@ -2,6 +2,13 @@
 # Whole-project pull-request check used locally and by GitHub Actions.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+[ -f "$ROOT/package.json" ] && {
+  [ -f "$ROOT/package-lock.json" ] || { echo 'package-lock.json is required when package.json exists' >&2; exit 1; }
+  npm ci --ignore-scripts --prefix "$ROOT"
+  for script in typecheck lint test:unit test:contract test:browser test:events; do
+    npm run --prefix "$ROOT" "$script"
+  done
+}
 for file in "$ROOT"/bin/*; do
   [ -f "$file" ] || continue
   case "$(head -1 "$file")" in *bash*) bash -n "$file";; esac
