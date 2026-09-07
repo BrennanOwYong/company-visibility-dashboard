@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Software Factory — stop raw-dogging the SDLC</title>
+<meta name="description" content="A software factory that automates the software development life cycle (SDLC) instead of vibe coding it. Sourced, clickable, and built to outlast one context window.">
+<style>
+  :root {
+    --bg: #faf8f4;
+    --bg-raised: #ffffff;
+    --ink: #1a1611;
+    --ink-dim: #55504a;
+    --accent: #b5451b;
+    --accent-2: #1f5f4a;
+    --line: #e4ddd2;
+    --code-bg: #efe9dd;
+    --tag: #6b4e9c;
+    max-width: 100%;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #171310;
+      --bg-raised: #211c17;
+      --ink: #f3ede2;
+      --ink-dim: #b5ac9c;
+      --accent: #ff8a5c;
+      --accent-2: #6fd3ad;
+      --line: #3a3228;
+      --code-bg: #241f18;
+      --tag: #c9adf5;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 0 24px 96px; }
+  code, .mono { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 0.92em; }
+  code {
+    background: var(--code-bg);
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+  }
+  a { color: var(--accent); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 2px; }
+  a:hover { text-decoration-color: var(--accent); }
+  img { max-width: 100%; display: block; }
+
+  header.hero { padding: 72px 0 32px; }
+  .kicker {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-2);
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-size: clamp(2rem, 5vw, 2.9rem);
+    line-height: 1.1;
+    margin: 0 0 20px;
+    letter-spacing: -0.01em;
+  }
+  .dek { font-size: 1.2rem; color: var(--ink-dim); margin: 0 0 32px; }
+
+  blockquote.tagline {
+    margin: 32px 0 8px;
+    padding: 20px 24px;
+    border-left: 4px solid var(--accent);
+    background: var(--bg-raised);
+    border-radius: 0 10px 10px 0;
+    font-size: 1.15rem;
+    font-style: italic;
+  }
+  .tagline-attr {
+    font-size: 0.85rem;
+    color: var(--ink-dim);
+    font-style: normal;
+    margin-top: 10px;
+  }
+
+  section { margin: 56px 0; }
+  h2 {
+    font-size: 1.5rem;
+    border-bottom: 2px solid var(--line);
+    padding-bottom: 10px;
+    margin: 0 0 20px;
+  }
+  h3 { font-size: 1.05rem; margin: 0 0 6px; }
+  p { margin: 0 0 16px; }
+
+  .cite-grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+  .cite-card {
+    display: grid;
+    grid-template-columns: 128px 1fr;
+    gap: 16px;
+    background: var(--bg-raised);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .cite-card img {
+    width: 128px;
+    height: 72px;
+    object-fit: cover;
+    border-radius: 8px;
+  }
+  .cite-card .who { font-weight: 700; margin: 0 0 2px; }
+  .cite-card .role { font-size: 0.85rem; color: var(--ink-dim); margin: 0 0 8px; }
+  .cite-card blockquote { margin: 0 0 8px; font-size: 0.95rem; }
+  .cite-card footer { font-size: 0.8rem; }
+  @media (max-width: 520px) {
+    .cite-card { grid-template-columns: 1fr; }
+    .cite-card img { width: 100%; height: auto; aspect-ratio: 16/9; }
+  }
+
+  .pipeline { display: flex; flex-direction: column; gap: 10px; }
+  details.stage {
+    background: var(--bg-raised);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  details.stage summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 16px 18px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 600;
+  }
+  details.stage summary::-webkit-details-marker { display: none; }
+  details.stage summary .num {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    color: var(--accent-2);
+    font-weight: 700;
+    min-width: 1.6em;
+  }
+  details.stage summary .chev {
+    margin-left: auto;
+    transition: transform 0.15s ease;
+    color: var(--ink-dim);
+  }
+  details.stage[open] summary .chev { transform: rotate(90deg); }
+  details.stage .stage-body { padding: 0 18px 20px 18px; border-top: 1px solid var(--line); }
+  details.stage .stage-body h4 {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin: 18px 0 6px;
+  }
+  details.stage .stage-body h4:first-child { margin-top: 16px; }
+  .compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 10px;
+  }
+  .compare .col {
+    padding: 12px 14px;
+    border-radius: 8px;
+    font-size: 0.92rem;
+  }
+  .compare .raw { background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+  .compare .factory { background: color-mix(in srgb, var(--accent-2) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent-2) 35%, transparent); }
+  .compare .col strong { display: block; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+  @media (max-width: 520px) { .compare { grid-template-columns: 1fr; } }
+
+  .next-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  .next-card {
+    background: var(--bg-raised);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--tag);
+    border-radius: 8px;
+    padding: 16px 18px;
+  }
+  .next-card h3 { display: flex; align-items: center; gap: 8px; }
+  .pill {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: color-mix(in srgb, var(--tag) 18%, transparent);
+    color: var(--tag);
+    padding: 2px 8px;
+    border-radius: 999px;
+  }
+  .skill-list { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 10px; }
+  .skill-list a.skill-link {
+    display: block;
+    text-decoration: none;
+    background: var(--code-bg);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--ink);
+  }
+  .skill-list a.skill-link .name { color: var(--accent); font-weight: 700; text-decoration: underline; }
+  .skill-list a.skill-link .desc { color: var(--ink-dim); font-size: 0.9rem; }
+
+  footer.sources {
+    border-top: 1px solid var(--line);
+    padding-top: 24px;
+    font-size: 0.88rem;
+    color: var(--ink-dim);
+  }
+  footer.sources ol { padding-left: 20px; }
+  footer.sources li { margin-bottom: 8px; }
+  .cta {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 12px 20px;
+    background: var(--accent);
+    color: #fff8f2;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 700;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <p class="kicker">field notes from a repo that automates itself</p>
+  <h1>Stop raw-dogging the software development life cycle</h1>
+  <p class="dek">This repo runs a pipeline instead of a prompt. Here's the reasoning, the receipts, and what's landing next.</p>
+
+  <blockquote class="tagline">
+    "I saw dark software factories and thought: why are y'all building systems to raw-dog it when it
+    costs the same effort to automate the SDLC — a system known to work — and get much higher returns?
+    Tokenism has rotted and smoothed out your brains, istg."
+    <div class="tagline-attr">— the person who built this repo, mid-scroll, mildly enraged</div>
+  </blockquote>
+</header>
+
+<section id="thesis">
+  <h2>Vibe coding raw is a choice, not a default</h2>
+  <p>
+    Software development life cycle (SDLC) is the old, boring, unkillable term for "how software actually
+    gets from idea to production": requirements, design, build, test, deploy, maintain. It's been the
+    known-working system for decades. Somewhere in the last two years, a chunk of the industry decided
+    the large language model (LLM) era means skipping every step of it and just typing vibes into a chat
+    box until something compiles.
+  </p>
+  <p>
+    That's fine for a weekend toy. It is not fine for a codebase you'll still be reading in six months.
+    The people who actually run agents at scale for a living say the same thing, on the record, with
+    receipts:
+  </p>
+</section>
+
+<section id="sources">
+  <div class="cite-grid">
+
+    <div class="cite-card">
+      <a href="https://x.com/karpathy/status/1886192184808149383" target="_blank" rel="noopener">
+        <img src="https://img.youtube.com/vi/96jN2OCOfLs/hqdefault.jpg" alt="Andrej Karpathy speaking on stage" loading="lazy">
+      </a>
+      <div>
+        <p class="who">Andrej Karpathy</p>
+        <p class="role">Co-founder, OpenAI · ex-Tesla AI · coined the term</p>
+        <blockquote>"There's a new kind of coding I call 'vibe coding', where you fully give in to the
+        vibes... and forget that the code even exists."</blockquote>
+        <footer>
+          Coined it in a <a href="https://x.com/karpathy/status/1886192184808149383" target="_blank" rel="noopener">Feb 2025 post</a>.
+          One year later, on stage with Sequoia's Stephanie Zhan, he called it obsolete for anything past
+          a throwaway demo — watch
+          <a href="https://www.youtube.com/watch?v=96jN2OCOfLs" target="_blank" rel="noopener">"From Vibe Coding to Agentic Engineering."</a>
+        </footer>
+      </div>
+    </div>
+
+    <div class="cite-card">
+      <a href="https://www.youtube.com/watch?v=8kMaTybvDUw" target="_blank" rel="noopener">
+        <img src="https://img.youtube.com/vi/8kMaTybvDUw/hqdefault.jpg" alt="Dex Horthy presenting 12-Factor Agents at AI Engineer" loading="lazy">
+      </a>
+      <div>
+        <p class="who">Dex Horthy</p>
+        <p class="role">Founder/CEO, HumanLayer</p>
+        <blockquote>"Own your prompts. Own your context window. Own your control flow."</blockquote>
+        <footer>
+          From <a href="https://www.youtube.com/watch?v=8kMaTybvDUw" target="_blank" rel="noopener">"12-Factor Agents: Patterns of reliable LLM applications"</a>
+          (AI Engineer), distilled from talking to ~100 engineers shipping agents in production.
+        </footer>
+      </div>
+    </div>
+
+    <div class="cite-card">
+      <a href="https://www.youtube.com/watch?v=rmvDxxNubIg" target="_blank" rel="noopener">
+        <img src="https://img.youtube.com/vi/rmvDxxNubIg/hqdefault.jpg" alt="Dex Horthy presenting No Vibes Allowed" loading="lazy">
+      </a>
+      <div>
+        <p class="who">Dex Horthy, again</p>
+        <p class="role">on brownfield codebases specifically</p>
+        <blockquote>"The more you use the context window, the worse outcomes you get."</blockquote>
+        <footer>
+          From <a href="https://www.youtube.com/watch?v=rmvDxxNubIg" target="_blank" rel="noopener">"No Vibes Allowed: Solving Hard Problems in Complex Codebases"</a>
+          — coins the <strong>Dumb Zone</strong> (the middle 40–60% of a full context window, where a
+          model's signal-to-noise falls apart) and the <strong>RPI</strong> loop: Research, then Plan,
+          then Implement. He also ran a fully autonomous "lights-off" factory for three months in 2025 —
+          it quietly corrupted the codebase. His fix wasn't more automation, it was putting one human
+          hour of planning back at the front.
+        </footer>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section id="pipeline">
+  <h2>The pipeline, stage by stage (click one)</h2>
+  <p>
+    This is the actual lifecycle this repo runs, taken straight from its own <code>README</code>. Every
+    card below is the same shape: what happens, why it's built that way, and what the raw-vibes version
+    of that same step usually looks like.
+  </p>
+
+  <div class="pipeline">
+
+    <details class="stage">
+      <summary><span class="num">01</span> Product interview <span class="chev">▸</span></summary>
+      <div class="stage-body">
+        <h4>What happens</h4>
+        <p>Before any code, the coordinator interviews you for the real product requirements document
+        (PRD) and outcomes. It gets written to <code>docs/product/PRD.md</code> as the one source of
+        truth every later agent reads from.</p>
+        <h4>The wisdom</h4>
+        <p>This is Horthy's RPI loop's "Research" step, forced out of your head and into a file. It
+        matters because of the Dumb Zone: dump a vague idea straight into an agent's context and by the
+        time you're 60% through the window, recall is already degrading. Write the distilled version
+        once, and every downstream builder reads that instead of the mess.</p>
+        <div class="compare">
+          <div class="col raw"><strong>Raw vibe coding</strong>"Build me a dashboard" typed into a chat
+          box. No PRD to check a bug report against later, so every disagreement becomes a fresh feature
+          debate.</div>
+          <div class="col factory"><strong>This factory</strong>One interview, one file, every agent from
+          here on reads the same requirements instead of re-guessing them.</div>
+        </div>
+      </div>
+    </details>
+
+    <details class="stage">
+      <summary><span class="num">02</span> Whole architecture <span class="chev">▸</span></summary>
+      <div class="stage-body">
+        <h4>What happens</h4>
+        <p><code>docs/architecture/overview.md</code> gets drawn once against the full PRD, before any
+        feature work starts.</p>
+        <h4>The wisdom</h4>
+        <p>"Own your context window" — one of Horthy's 12 factors. Architecture decided once and
+        referenced by every feature, instead of re-decided inside whatever context window happens to be
+        open that day.</p>
+        <div class="compare">
+          <div class="col raw"><strong>Raw vibe coding</strong>Architecture gets re-derived every session.
+          Day 40's structure quietly disagrees with day 4's.</div>
+          <div class="col factory"><strong>This factory</strong>One architecture doc, Git-tracked, that
+          every feature's implementation view has to agree with.</div>
+        </div>
+      </div>
+    </details>
+
+    <details class="stage">
+      <summary><span class="num">03</span> Feature views + parseable roadmap <span class="chev">▸</span></summary>
+      <div class="stage-body">
+        <h4>What happens</h4>
+        <p>Each feature gets its own mini-PRD and architecture note. <code>roadmap.json</code> encodes the
+        dependency graph as a directed acyclic graph (DAG), computed by a script, not guessed by a model.</p>
+        <h4>The wisdom</h4>
+        <p>"Own your control flow." Ordering is deterministic code, so it cannot hallucinate a dependency
+        that doesn't exist or forget one that does.</p>
+        <div class="compare">
+          <div class="col raw"><strong>Raw vibe coding</strong>Features ship in whatever order feels
+          productive, and it's on you to remember which ones quietly depended on each other.</div>
+          <div class="col factory"><strong>This factory</strong><code>bin/roadmap-sync</code> computes the
+          DAG and refuses to sync a roadmap that doesn't resolve.</div>
+        </div>
+      </div>
+    </details>
+
+    <details class="stage">
+      <summary><span class="num">04</span> Ready builder, isolated worktree <span class="chev">▸</span></summary>
+      <div class="stage-body">
+        <h4>What happens</h4>
+        <p><code>bin/kanban-dispatch</code> spins up one low-cost builder subagent per ready ticket, each
+        in its own Git worktree, running in parallel up to a concurrency cap.</p>
+        <h4>The wisdom</h4>
+        <p>Isolation is the exact guardrail Horthy's failed "dark factory" experiment was missing.
+        Parallel agents stepping on the same files is how a codebase measurably degrades over three to
+        six months, even with strong prompts. Worktrees make interference structurally impossible
+        instead of policy-enforced.</p>
+        <div class="compare">
+          <div class="col raw"><strong>Raw vibe coding</strong>One shared branch, one context window, every
+          parallel idea fighting over the same files.</div>
+          <div class="col factory"><strong>This factory</strong>N builders, N worktrees, zero shared
+          mutable state until integration.</div>
+        </div>
+      </div>
+    </details>
+
+    <details class="stage">
+      <summary><span class="num">05</span> Self-test + correlated logs + optional AAR <span class="chev">▸</span></summary>
+      <div class="stage-body">
+        <h4>What happens</h4>
+        <p>The builder writes structured observability and runs its own deterministic tests against the
+        live app before it's allowed to signal done. It can also write an after-action review (AAR)
+        flagging what to optimize next time.</p>
+        <h4>The wisdom</h4>
+        <p>Anything with an objective pass/fail belongs to the agent that wrote the code, with evidence
+        correlated to the exact commit, not to a person's memory of "yeah I clicked through it and it
+        seemed fine."</p>
+        <div class="compare">
+          <div class="col raw"><strong>Raw vibe coding</strong>"Looks like it works" after one manual
+          click-through. No artifact proves it, no note for future-you about what almost broke.</div>
+          <div class="col factory"><strong>This factory</strong>Logs and test results tied to the commit
+          that produced them, checked before the next stage even starts.</div>
+        </div>
+      </div>
+    </details>
+
+    <details class="stage">
+      <summary><span class="num">06</span> Programmatic rebase + post-rebase test <span class="chev">▸</span></summary>
+      <div class="stage-body">
+        <h4>What happens</h4>
+        <p><code>bin/prepare-for-test</code> rebases the candidate onto current <code>main</code> and
+        reruns the whole-project check (<code>bin/project-test</code>) <em>after</em> the rebase, not
+        before.</p>
+        <h4>The wisdom</h4>
+        <p>This structurally rules out "worked in isolation, broke on integration" — the same failure
+        Horthy names as the reason lights-off factories rot: nobody re-checks after the world underneath
+        them moved.</p>
+        <div class="compare">
+          <div class="col raw"><strong>Raw vibe coding</strong>Merge conflicts get resolved by whoever's
+          prompting that day; tests, if they exist, ran before the merge.</div>
+          <div class="col factory"><strong>This factory</strong>Rebase first, then test against what
+          <code>main</code> actually looks like right now.</div>
+        </div>
+      </div>
+    </details>
+
+    <details class="stage">
+      <summary><span class="num">07</span> Independent criterion/event audit <span class="chev">▸</span></summary>
+      <div class="stage-body">
+        <h4>What happens</h4>
+        <p>A separate validator worker checks the builder's claimed criteria and events, without touching
+        product code and without reading the builder's own tests.</p>
+        <h4>The wisdom</h4>
+        <p>The auditor never wrote the code it's auditing, so it's structural independence instead of
+        trust in a self-report. This is Horthy's leverage-point factory in one stage: automate the check,
+        keep a real verification step that isn't graded by the thing being graded.</p>
+        <div class="compare">
+          <div class="col raw"><strong>Raw vibe coding</strong>You are your own reviewer, in the same
+          context window that wrote the code, grading your own homework.</div>
+          <div class="col factory"><strong>This factory</strong>A second worker, with no memory of writing
+          it, re-derives whether the criteria actually hold.</div>
+        </div>
+      </div>
+    </details>
+
+    <details class="stage">
+      <summary><span class="num">08</span> Optional subjective user test <span class="chev">▸</span></summary>
+      <div class="stage-body">
+        <h4>What happens</h4>
+        <p>For anything that needs a human reaction rather than a pass/fail, execution pauses in the
+        browser UI and hands you a scenario card: setup, what to do, what to judge, what's already
+        verified.</p>
+        <h4>The wisdom</h4>
+        <p>Objective checks are automatable. "Does this feel right" is not. Encoding that split instead
+        of asking a model to guess at your taste is the whole point of this stage.</p>
+        <div class="compare">
+          <div class="col raw"><strong>Raw vibe coding</strong>Either the agent rubber-stamps itself, or
+          you re-review every line by hand because nothing separates provable from felt.</div>
+          <div class="col factory"><strong>This factory</strong>You only get pulled in for the part that
+          actually needs your judgment.</div>
+        </div>
+      </div>
+    </details>
+
+    <details class="stage">
+      <summary><span class="num">09</span> Push exact candidate + GitHub pull request <span class="chev">▸</span></summary>
+      <div class="stage-body">
+        <h4>What happens</h4>
+        <p><code>bin/ticket-integrate</code> pushes the literal commit that passed every prior check, not
+        a re-generated one, and opens the pull request (PR) automatically.</p>
+        <h4>The wisdom</h4>
+        <p>Horthy calls the PR "a batch artifact from the email-patch era" and wants it dead in favor of
+        real-time review. This factory keeps the PR — audit trail and compliance still matter — but
+        automates everything upstream of it, so review collapses toward his ~20-minutes-not-hours number
+        instead of vanishing entirely.</p>
+        <div class="compare">
+          <div class="col raw"><strong>Raw vibe coding</strong>No PR, or a PR nobody wants to open because
+          there's no correlated evidence behind the diff.</div>
+          <div class="col factory"><strong>This factory</strong>A PR backed by test results, an audit, and
+          a rebase that already happened.</div>
+        </div>
+      </div>
+    </details>
+
+    <details class="stage">
+      <summary><span class="num">10</span> Merge → fast-forward → next dispatch <span class="chev">▸</span></summary>
+      <div class="stage-body">
+        <h4>What happens</h4>
+        <p>Once GitHub merges into remote <code>main</code>, local <code>main</code> fast-forwards and
+        <code>bin/github-sync</code> automatically dispatches the next roadmap-ready ticket from the DAG.</p>
+        <h4>The wisdom</h4>
+        <p>The loop closes on its own. Throughput compounds because dispatch doesn't wait on a human to
+        notice a ticket got unblocked — this is the automation Horthy credits for a 2–3x speedup once the
+        upfront planning hour is paid.</p>
+        <div class="compare">
+          <div class="col raw"><strong>Raw vibe coding</strong>Someone has to remember to unblock the next
+          task by hand, every single time, forever.</div>
+          <div class="col factory"><strong>This factory</strong>Merge triggers the next dispatch. Nobody
+          has to remember anything.</div>
+        </div>
+      </div>
+    </details>
+
+  </div>
+</section>
+
+<section id="whats-next">
+  <h2>What's next in the pipeline</h2>
+  <p>None of this is done cooking. Here's what's getting wired into the factory next, not bolted on the
+  side, actually dispatched through the same lifecycle above.</p>
+
+  <div class="next-grid">
+
+    <div class="next-card">
+      <h3>3-tier memory system <span class="pill">core</span></h3>
+      <p>The Dumb Zone is a memory problem, not a doc-layout problem, so it gets a memory-shaped fix:
+      long-term memory for facts that don't expire, project memory for this roadmap's state, and working
+      memory scoped to the current ticket only. No agent loads more context than the tier it's working
+      in actually needs.</p>
+    </div>
+
+    <div class="next-card">
+      <h3>Graphify integration <span class="pill">visibility</span></h3>
+      <p>The roadmap DAG already exists as data in <code>roadmap.json</code>. Graphify turns it into an
+      actual live graph in the project UI, so blockers, parallel tracks, and critical paths get seen
+      instead of read line by line.</p>
+    </div>
+
+    <div class="next-card">
+      <h3>Brownfield refactoring measures <span class="pill">hardening</span></h3>
+      <p>Everything above assumes greenfield. Horthy's brownfield war story (a 300k+ line Rust codebase,
+      handled with RPI instead of raw prompting) is the target case: dependency-mapping a module before
+      any refactor touches it, and a regression boundary around legacy code that new agents can't quietly
+      widen.</p>
+    </div>
+
+    <div class="next-card">
+      <h3>Quality-of-life skill roadmap <span class="pill">tooling</span></h3>
+      <p>Skills getting dispatched into the builder's own toolbelt next:</p>
+      <div class="skill-list">
+        <a class="skill-link" href="https://github.com/DietrichGebert/ponytail" target="_blank" rel="noopener">
+          <span class="name">Ponytail</span> —
+          <span class="desc">injects a "does this even need to exist" ruleset before the builder writes a
+          line; benchmarked up to 94% less code for the same task.</span>
+        </a>
+        <a class="skill-link" href="https://21st.dev/" target="_blank" rel="noopener">
+          <span class="name">21st.dev Magic MCP</span> —
+          <span class="desc">Model Context Protocol (MCP) server that drops in production-grade UI
+          components from a prompt instead of hand-rolling every button.</span>
+        </a>
+        <a class="skill-link" href="https://github.com/vercel-labs/agent-browser" target="_blank" rel="noopener">
+          <span class="name">Vercel agent-browser</span> —
+          <span class="desc">browser automation CLI for the builder's own live-app tests — reportedly ~82%
+          less context per run than Playwright MCP.</span>
+        </a>
+        <a class="skill-link" href="https://github.com/trailofbits/skills" target="_blank" rel="noopener">
+          <span class="name">Claude Code cybersecurity skills</span> —
+          <span class="desc">Trail of Bits' security-research and audit skills, folded into the builder's
+          own automated test pass instead of a separate pentest step.</span>
+        </a>
+      </div>
+    </div>
+
+  </div>
+
+  <h3 style="margin-top:36px;">Considerations: prior art already on the table</h3>
+  <p>None of this is invented in a vacuum. There's a live cluster of open-source projects attacking
+  "coordinate a fleet of coding agents" from different angles. Worth naming, so it's clear what's
+  already adopted versus what's still being weighed.</p>
+  <div class="next-grid">
+    <div class="next-card">
+      <h3>Herdr <span class="pill">already in use</span></h3>
+      <p><a href="https://github.com/herdrdev/herdr" target="_blank" rel="noopener">herdr</a> is the
+      terminal multiplexer this factory's README already names as the supervision layer for its
+      coordinator, builder, validator, logs, and UI panes. It's agent-native — a background Rust runtime
+      that owns each agent's terminal session so work survives a closed laptop lid, and surfaces a single
+      working/blocked/done attention queue instead of N terminal tabs.</p>
+    </div>
+    <div class="next-card">
+      <h3>Gastown <span class="pill">evaluating</span></h3>
+      <p>Steve Yegge's <a href="https://github.com/gastownhall/gastown" target="_blank" rel="noopener">Gas
+      Town</a> coordinates fleets of coding agents through git-backed issue tracking ("beads") and a
+      Bors-style merge queue, reportedly scaling to 20-30 concurrent agents. It overlaps with this
+      factory's dispatch-and-worktree model; on the table for the day ticket volume outgrows the current
+      concurrency cap.</p>
+    </div>
+    <div class="next-card">
+      <h3>Goose <span class="pill">evaluating</span></h3>
+      <p><a href="https://github.com/block/goose" target="_blank" rel="noopener">Goose</a>, Block's
+      general-purpose agent (now under the Agentic AI Foundation), is Model Context Protocol
+      (MCP)-native with 70+ extensions and a bring-your-own-key model. It isn't a pipeline by itself, so
+      it's being weighed as an alternate execution backend for builder/tester roles, not a replacement
+      for the DAG or the independent audit stage.</p>
+    </div>
+    <div class="next-card">
+      <h3>Hive <span class="pill">watching</span></h3>
+      <p>"Hive" names at least half a dozen unrelated projects right now (<a href="https://github.com/aden-hive/hive" target="_blank" rel="noopener">aden-hive/hive</a>,
+      <a href="https://github.com/ivankuznetsov/hive" target="_blank" rel="noopener">ivankuznetsov/hive</a>,
+      and others), all aimed at roughly the same idea-to-merge-ready-PR problem this factory solves. That
+      much naming collision on one problem is a signal the space hasn't converged yet — worth watching
+      before adopting any single one wholesale.</p>
+    </div>
+  </div>
+</section>
+
+<section id="try-it">
+  <h2>Read the code, not the pitch</h2>
+  <p>Every claim above is a script or a doc path in this repo, not marketing copy. Start with the
+  <code>README</code>, or go straight to the source.</p>
+  <a class="cta" href="https://github.com/BrennanOwYong/company-visibility-dashboard" target="_blank" rel="noopener">View the repo →</a>
+</section>
+
+<footer class="sources">
+  <p><strong>Sources cited on this page</strong></p>
+  <ol>
+    <li>Andrej Karpathy, "There's a new kind of coding I call 'vibe coding'" — <a href="https://x.com/karpathy/status/1886192184808149383" target="_blank" rel="noopener">X post, Feb 2, 2025</a>.</li>
+    <li>Andrej Karpathy & Stephanie Zhan, <a href="https://www.youtube.com/watch?v=96jN2OCOfLs" target="_blank" rel="noopener">"From Vibe Coding to Agentic Engineering," AI Ascent 2026</a>.</li>
+    <li>Dex Horthy, <a href="https://www.youtube.com/watch?v=8kMaTybvDUw" target="_blank" rel="noopener">"12-Factor Agents: Patterns of reliable LLM applications," AI Engineer</a>.</li>
+    <li>Dex Horthy, <a href="https://www.youtube.com/watch?v=rmvDxxNubIg" target="_blank" rel="noopener">"No Vibes Allowed: Solving Hard Problems in Complex Codebases," AI Engineer</a>.</li>
+    <li>Dex Horthy, <a href="https://linearb.io/dev-interrupted/podcast/dex-horthy-humanlayer-rpi-methodology-ralph-loop" target="_blank" rel="noopener">"Dex Horthy on Ralph, RPI, and escaping the Dumb Zone," Dev Interrupted</a>.</li>
+    <li>Ponytail — <a href="https://github.com/DietrichGebert/ponytail" target="_blank" rel="noopener">github.com/DietrichGebert/ponytail</a>.</li>
+    <li>21st.dev Magic MCP Server — <a href="https://21st.dev/" target="_blank" rel="noopener">21st.dev</a>.</li>
+    <li>agent-browser — <a href="https://github.com/vercel-labs/agent-browser" target="_blank" rel="noopener">github.com/vercel-labs/agent-browser</a>.</li>
+    <li>Claude Code cybersecurity skills — <a href="https://github.com/trailofbits/skills" target="_blank" rel="noopener">github.com/trailofbits/skills</a>.</li>
+  </ol>
+  <p>Thumbnail images are the actual YouTube thumbnails of the cited talks, linking to the source video.</p>
+</footer>
+
+</div>
+</body>
+</html>
