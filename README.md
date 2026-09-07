@@ -1,10 +1,11 @@
 # Project-local Codex software factory
 
-**[Read the full pitch, sourced, with a clickable stage-by-stage breakdown →](https://brennanowyong.github.io/company-visibility-dashboard/)**
+**[Read the architecture article →](https://brennanowyong.github.io/company-visibility-dashboard/)**
 
 This repository is a project-local software factory. It turns product intent into a tested GitHub
-pull request through explicit requirements, a dependency graph, isolated builders, independent
-validation, and evidence-backed delivery.
+pull request through explicit requirements, a computed dependency graph, isolated builders,
+independent validation, and evidence-backed delivery. The [project page](https://brennanowyong.github.io/company-visibility-dashboard/)
+explains the architecture, the lessons applied, and the request data flow with diagrams.
 
 ## See it
 

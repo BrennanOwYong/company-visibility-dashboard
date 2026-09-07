@@ -223,23 +223,106 @@
     text-decoration: none;
     font-weight: 700;
   }
+  .eyebrow { color: var(--accent-2); font-family: "SF Mono", Menlo, Consolas, monospace; font-size: .78rem; letter-spacing: .08em; text-transform: uppercase; }
+  .architecture { background: var(--bg-raised); border: 1px solid var(--line); border-radius: 14px; padding: 18px; overflow: auto; }
+  .architecture svg { min-width: 620px; width: 100%; height: auto; }
+  .architecture text { fill: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .architecture .muted { fill: var(--ink-dim); font-size: 12px; }
+  .architecture .label { font-size: 13px; font-weight: 700; }
+  .architecture .box { fill: var(--bg); stroke: var(--line); stroke-width: 1.5; }
+  .architecture .box.accent { fill: color-mix(in srgb, var(--accent) 12%, var(--bg-raised)); stroke: var(--accent); }
+  .architecture .box.green { fill: color-mix(in srgb, var(--accent-2) 12%, var(--bg-raised)); stroke: var(--accent-2); }
+  .architecture .flow { fill: none; stroke: var(--accent); stroke-width: 2; marker-end: url(#arrow); }
+  .sequence-wrap { border: 1px solid var(--line); border-radius: 14px; padding: 18px; background: var(--bg-raised); }
+  .sequence-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .sequence-controls button { border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 999px; padding: 7px 11px; cursor: pointer; font: inherit; font-size: .85rem; }
+  .sequence-controls button[aria-selected="true"] { background: var(--accent); color: white; border-color: var(--accent); }
+  .sequence { overflow: auto; }
+  .sequence svg { min-width: 660px; width: 100%; height: auto; }
+  .sequence text { fill: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .sequence .lane { stroke: var(--line); stroke-dasharray: 4 5; }
+  .sequence .message { opacity: .18; transition: opacity .2s, stroke-width .2s; }
+  .sequence .message.active { opacity: 1; stroke-width: 3; }
+  .sequence .message-label { opacity: .35; transition: opacity .2s; }
+  .sequence .message-label.active { opacity: 1; font-weight: 700; }
+  .sequence-note { border-left: 3px solid var(--accent); padding: 10px 13px; margin: 16px 0 0; color: var(--ink-dim); }
 </style>
 </head>
 <body>
 <div class="wrap">
 
 <header class="hero">
-  <p class="kicker">field notes from a repo that automates itself</p>
-  <h1>Stop raw-dogging the software development life cycle</h1>
-  <p class="dek">This repo runs a pipeline instead of a prompt. Here's the reasoning, the receipts, and what's landing next.</p>
+  <p class="kicker">architecture notes · software factory</p>
+  <h1>From a vague idea to a proven pull request</h1>
+  <p class="dek">A field note on designing an agentic software factory: the architecture, the lessons that shaped it, and one request traced from intent to evidence.</p>
 
   <blockquote class="tagline">
-    "I saw dark software factories and thought: why are y'all building systems to raw-dog it when it
-    costs the same effort to automate the SDLC — a system known to work — and get much higher returns?
-    Tokenism has rotted and smoothed out your brains, istg."
-    <div class="tagline-attr">— the person who built this repo, mid-scroll, mildly enraged</div>
+    The useful unit is not an agent. It is a controlled flow of intent, work, and proof.
+    <div class="tagline-attr">— the design constraint behind this repository</div>
   </blockquote>
 </header>
+
+<section id="architecture">
+  <p class="eyebrow">01 · the architecture</p>
+  <h2>Keep meaning, coordination, execution, and proof separate</h2>
+  <p>The system has four boundaries. Product files define what should exist. A deterministic roadmap defines what may start. Isolated workers change code. Tests and an independent audit produce proof before delivery.</p>
+  <div class="architecture" role="img" aria-label="Architecture diagram showing product memory flowing into deterministic orchestration, isolated execution, and evidence-backed delivery">
+    <svg viewBox="0 0 900 290" xmlns="http://www.w3.org/2000/svg">
+      <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--accent)"/></marker></defs>
+      <text x="30" y="26" class="muted">PRODUCT MEMORY</text><text x="255" y="26" class="muted">ORCHESTRATION</text><text x="485" y="26" class="muted">EXECUTION</text><text x="715" y="26" class="muted">PROOF</text>
+      <rect class="box" x="20" y="48" width="175" height="70" rx="10"/><text x="38" y="76" class="label">PRD + principles</text><text x="38" y="98" class="muted">user intent, constraints</text>
+      <rect class="box" x="20" y="150" width="175" height="70" rx="10"/><text x="38" y="178" class="label">Feature contracts</text><text x="38" y="200" class="muted">acceptance, architecture</text>
+      <rect class="box accent" x="245" y="48" width="185" height="70" rx="10"/><text x="263" y="76" class="label">roadmap-sync</text><text x="263" y="98" class="muted">computes the DAG</text>
+      <rect class="box accent" x="245" y="150" width="185" height="70" rx="10"/><text x="263" y="178" class="label">dispatch + state</text><text x="263" y="200" class="muted">ready, running, blocked</text>
+      <rect class="box green" x="475" y="48" width="185" height="70" rx="10"/><text x="493" y="76" class="label">isolated worktree</text><text x="493" y="98" class="muted">builder changes code</text>
+      <rect class="box green" x="475" y="150" width="185" height="70" rx="10"/><text x="493" y="178" class="label">rebase + self-test</text><text x="493" y="200" class="muted">candidate is reproducible</text>
+      <rect class="box" x="705" y="48" width="175" height="70" rx="10"/><text x="723" y="76" class="label">independent audit</text><text x="723" y="98" class="muted">criteria + events</text>
+      <rect class="box" x="705" y="150" width="175" height="70" rx="10"/><text x="723" y="178" class="label">GitHub PR</text><text x="723" y="200" class="muted">tested commit, merge</text>
+      <path class="flow" d="M195 83 H245"/><path class="flow" d="M195 185 H245"/><path class="flow" d="M337 118 V150"/><path class="flow" d="M430 83 H475"/><path class="flow" d="M567 118 V150"/><path class="flow" d="M660 185 H705"/><path class="flow" d="M792 118 V150"/>
+    </svg>
+  </div>
+  <p class="sequence-note"><strong>Design choice:</strong> models propose and implement inside boundaries; small programs own state transitions, dependency calculation, ports, and handoffs.</p>
+</section>
+
+<section id="data-flow">
+  <p class="eyebrow">02 · follow one request</p>
+  <h2>A small interactive sequence of the data flow</h2>
+  <p>Select a step. The highlighted message shows what moves, who owns it, and why the next boundary exists.</p>
+  <div class="sequence-wrap">
+    <div class="sequence-controls" role="tablist" aria-label="Request data-flow steps">
+      <button type="button" role="tab" aria-selected="true" data-step="1">1 · intent</button>
+      <button type="button" role="tab" aria-selected="false" data-step="2">2 · contract</button>
+      <button type="button" role="tab" aria-selected="false" data-step="3">3 · DAG</button>
+      <button type="button" role="tab" aria-selected="false" data-step="4">4 · work</button>
+      <button type="button" role="tab" aria-selected="false" data-step="5">5 · evidence</button>
+      <button type="button" role="tab" aria-selected="false" data-step="6">6 · delivery</button>
+    </div>
+    <div class="sequence">
+      <svg viewBox="0 0 820 300" role="img" aria-label="Interactive sequence diagram for a product request">
+        <defs><marker id="seq-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--accent)"/></marker></defs>
+        <text x="30" y="24" font-weight="700">Product owner</text><text x="205" y="24" font-weight="700">Memory</text><text x="375" y="24" font-weight="700">Coordinator</text><text x="555" y="24" font-weight="700">Builder / tester</text><text x="730" y="24" font-weight="700">GitHub</text>
+        <path class="lane" d="M75 38 V285"/><path class="lane" d="M245 38 V285"/><path class="lane" d="M425 38 V285"/><path class="lane" d="M615 38 V285"/><path class="lane" d="M775 38 V285"/>
+        <g class="message" data-step="1"><path d="M75 62 H245" stroke="var(--accent)" marker-end="url(#seq-arrow)"/><text x="92" y="55" class="message-label">write PRD</text></g>
+        <g class="message" data-step="2"><path d="M245 102 H425" stroke="var(--accent)" marker-end="url(#seq-arrow)"/><text x="285" y="95" class="message-label">feature contract</text></g>
+        <g class="message" data-step="3"><path d="M425 142 H245" stroke="var(--accent)" marker-end="url(#seq-arrow)"/><text x="270" y="135" class="message-label">computed DAG</text></g>
+        <g class="message" data-step="4"><path d="M425 182 H615" stroke="var(--accent)" marker-end="url(#seq-arrow)"/><text x="470" y="175" class="message-label">ticket + context</text></g>
+        <g class="message" data-step="5"><path d="M615 222 H425" stroke="var(--accent)" marker-end="url(#seq-arrow)"/><text x="465" y="215" class="message-label">test + audit evidence</text></g>
+        <g class="message" data-step="6"><path d="M425 262 H775" stroke="var(--accent)" marker-end="url(#seq-arrow)"/><text x="535" y="255" class="message-label">tested commit → PR</text></g>
+      </svg>
+    </div>
+    <p class="sequence-note" id="sequence-note"><strong>Step 1 — intent:</strong> the product owner’s request becomes a durable PRD. Later agents read the same meaning instead of reconstructing it from chat history.</p>
+  </div>
+</section>
+
+<section id="learnings">
+  <p class="eyebrow">03 · what changed my thinking</p>
+  <h2>Lessons applied, not merely cited</h2>
+  <div class="next-grid">
+    <div class="next-card"><h3>Context is a resource</h3><p>Research and planning happen before implementation. Builders receive a small, relevant context slice. This applies the RPI pattern and avoids asking one context window to hold the whole project.</p></div>
+    <div class="next-card"><h3>Control flow belongs in code</h3><p>The roadmap script computes prerequisites. Agents do not invent dependency edges in prompts. This makes parallel work safe and makes the state machine inspectable.</p></div>
+    <div class="next-card"><h3>Proof needs another reader</h3><p>A builder’s self-test is necessary but not sufficient. An independent tester checks criteria and event chains. Confidence comes from correlated evidence, not from a successful generation.</p></div>
+  </div>
+</section>
 
 <section id="thesis">
   <h2>Vibe coding raw is a choice, not a default</h2>
@@ -647,5 +730,29 @@
 </footer>
 
 </div>
+<script>
+  const sequenceNotes = {
+    1: '<strong>Step 1 — intent:</strong> the product owner’s request becomes a durable PRD. Later agents read the same meaning instead of reconstructing it from chat history.',
+    2: '<strong>Step 2 — contract:</strong> the feature gets acceptance criteria and an architecture view. The request becomes something a builder and tester can both check.',
+    3: '<strong>Step 3 — DAG:</strong> roadmap-sync computes the dependency graph. Ordering is a program output, not an agent guess.',
+    4: '<strong>Step 4 — work:</strong> the dispatcher gives one builder an isolated worktree and the exact project context it needs.',
+    5: '<strong>Step 5 — evidence:</strong> the candidate is rebased, self-tested, and checked by an independent tester against criteria and event chains.',
+    6: '<strong>Step 6 — delivery:</strong> only the tested commit moves to GitHub as a pull request. The merge becomes a visible, inspectable boundary.'
+  };
+  const buttons = document.querySelectorAll('.sequence-controls [data-step]');
+  const messages = document.querySelectorAll('.sequence [data-step]');
+  const note = document.querySelector('#sequence-note');
+  function showStep(step) {
+    buttons.forEach(button => button.setAttribute('aria-selected', button.dataset.step === step ? 'true' : 'false'));
+    messages.forEach(message => {
+      const active = message.dataset.step === step;
+      message.classList.toggle('active', active);
+      message.querySelector('.message-label').classList.toggle('active', active);
+    });
+    note.innerHTML = sequenceNotes[step];
+  }
+  buttons.forEach(button => button.addEventListener('click', () => showStep(button.dataset.step)));
+  showStep('1');
+</script>
 </body>
 </html>
